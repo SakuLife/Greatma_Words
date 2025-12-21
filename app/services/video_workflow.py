@@ -1,0 +1,348 @@
+"""
+Integrated video production workflow.
+Coordinates all services: script, images, voice, video, YouTube, Drive, Sheets, Discord.
+"""
+
+import time
+from pathlib import Path
+from typing import Any
+
+from app.config import settings
+from app.models.schemas import VideoMetadata
+from app.services.discord_notifier import DiscordNotifier
+from app.services.drive_manager import DriveManager
+from app.services.image_generator import ImageGenerator
+from app.services.script_generator import ScriptGenerator
+from app.services.sheets_manager import SheetsManager
+from app.services.thumbnail_generator import ThumbnailGenerator
+from app.services.video_creator import VideoCreator
+from app.services.voice_synthesizer import VoiceSynthesizer
+from app.services.youtube_uploader import YouTubeUploader
+from app.utils.file_manager import FileManager
+from app.utils.logger import logger
+
+
+class VideoWorkflow:
+    """Orchestrates the entire video production workflow with integrations."""
+
+    def __init__(
+        self,
+        enable_youtube: bool = True,
+        enable_drive: bool = True,
+        enable_sheets: bool = True,
+        enable_discord: bool = True,
+    ):
+        """
+        Initialize video workflow.
+
+        Args:
+            enable_youtube: Enable YouTube upload
+            enable_drive: Enable Google Drive upload
+            enable_sheets: Enable Google Sheets logging
+            enable_discord: Enable Discord notifications
+        """
+        self.enable_youtube = enable_youtube
+        self.enable_drive = enable_drive
+        self.enable_sheets = enable_sheets
+        self.enable_discord = enable_discord
+
+        # Initialize services
+        self.file_manager = FileManager()
+        self.script_generator = ScriptGenerator()
+        self.image_generator = ImageGenerator()
+        self.voice_synthesizer = VoiceSynthesizer()
+        self.video_creator = VideoCreator()
+        self.thumbnail_generator = ThumbnailGenerator()
+
+        # Initialize optional services
+        self.youtube_uploader = YouTubeUploader() if enable_youtube else None
+        self.drive_manager = DriveManager() if enable_drive else None
+        self.sheets_manager = SheetsManager() if enable_sheets else None
+        self.discord_notifier = DiscordNotifier() if enable_discord else None
+
+    async def create_video_complete(
+        self,
+        person_name: str,
+        theme: str,
+        target_duration: int = 15,
+        upload_to_youtube: bool = True,
+        upload_to_drive: bool = True,
+        privacy_status: str = "private",
+    ) -> dict[str, Any]:
+        """
+        Create a complete video from start to finish with all integrations.
+
+        Args:
+            person_name: Name of the person/figure
+            theme: Video theme
+            target_duration: Target video duration in minutes
+            upload_to_youtube: Whether to upload to YouTube
+            upload_to_drive: Whether to upload to Google Drive
+            privacy_status: YouTube privacy status (public/private/unlisted)
+
+        Returns:
+            Dictionary with results including URLs and metadata
+        """
+        start_time = time.time()
+
+        logger.info(f"Starting complete video workflow: {person_name} - {theme}")
+
+        # Send start notification
+        if self.discord_notifier:
+            await self.discord_notifier.notify_video_started(
+                person_name, theme, target_duration
+            )
+
+        try:
+            # Step 1: Create project structure
+            project_info = self.file_manager.create_project(person_name, theme)
+            project_dir = Path(project_info["project_dir"])
+
+            # Step 2: Generate script
+            logger.info("Step 1/6: Generating script...")
+            if self.discord_notifier:
+                await self.discord_notifier.notify_task_progress(
+                    "動画生成", 1, 6, "台本生成中..."
+                )
+
+            script_file = await self.script_generator.generate_script(
+                person_name=person_name,
+                theme=theme,
+                target_duration=target_duration,
+                output_path=project_dir / "script.json",
+            )
+
+            # Read script for word count
+            import json
+
+            with open(script_file, "r", encoding="utf-8") as f:
+                script_data = json.load(f)
+                word_count = sum(len(slide["text"]) for slide in script_data["slides"])
+
+            if self.discord_notifier:
+                await self.discord_notifier.notify_script_completed(
+                    person_name, word_count
+                )
+
+            # Step 3: Generate images
+            logger.info("Step 2/6: Generating images...")
+            if self.discord_notifier:
+                await self.discord_notifier.notify_task_progress(
+                    "動画生成", 2, 6, "画像生成中..."
+                )
+
+            if not settings.skip_image_generation:
+                image_paths = await self.image_generator.generate_images_from_script(
+                    script_file, project_dir / "images"
+                )
+                image_count = len(image_paths)
+            else:
+                logger.info("Skipping image generation (using existing images)")
+                image_count = 0
+
+            if self.discord_notifier:
+                await self.discord_notifier.notify_image_completed(
+                    person_name, image_count
+                )
+
+            # Step 4: Generate voice
+            logger.info("Step 3/6: Generating voice...")
+            if self.discord_notifier:
+                await self.discord_notifier.notify_task_progress(
+                    "動画生成", 3, 6, "音声合成中..."
+                )
+
+            audio_file = await self.voice_synthesizer.synthesize_from_script(
+                script_file, project_dir / "audio" / "narration.wav"
+            )
+
+            # Get audio duration
+            from pydub import AudioSegment
+
+            audio = AudioSegment.from_wav(str(audio_file))
+            audio_duration = len(audio) / 1000.0  # Convert to seconds
+
+            if self.discord_notifier:
+                await self.discord_notifier.notify_voice_completed(
+                    person_name, audio_duration
+                )
+
+            # Step 5: Create video
+            logger.info("Step 4/6: Creating video...")
+            if self.discord_notifier:
+                await self.discord_notifier.notify_task_progress(
+                    "動画生成", 4, 6, "動画編集中..."
+                )
+
+            video_file = await self.video_creator.create_video_from_script(
+                script_file=script_file,
+                audio_file=audio_file,
+                output_file=project_dir / "output" / f"{person_name}_{theme}.mp4",
+            )
+
+            # Step 6: Generate thumbnail
+            logger.info("Step 5/6: Generating thumbnail...")
+            if self.discord_notifier:
+                await self.discord_notifier.notify_task_progress(
+                    "動画生成", 5, 6, "サムネイル生成中..."
+                )
+
+            if not settings.skip_thumbnail_generation:
+                thumbnail_file = await self.thumbnail_generator.generate_thumbnail(
+                    person_name=person_name,
+                    theme=theme,
+                    output_path=project_dir / "output" / "thumbnail.jpg",
+                )
+            else:
+                logger.info("Skipping thumbnail generation")
+                thumbnail_file = None
+
+            # Step 7: Upload to YouTube (optional)
+            logger.info("Step 6/6: Uploading...")
+            youtube_url = None
+            video_id = None
+
+            if upload_to_youtube and self.youtube_uploader and self.enable_youtube:
+                if self.discord_notifier:
+                    await self.discord_notifier.notify_task_progress(
+                        "動画生成", 6, 6, "YouTubeにアップロード中..."
+                    )
+
+                metadata = VideoMetadata(
+                    title=f"{person_name} - {theme}",
+                    description=f"{person_name}の{theme}について解説した動画です。\n\n"
+                    f"動画時間: {int(audio_duration // 60)}分{int(audio_duration % 60)}秒\n\n"
+                    f"#教養 #{person_name} #ビジネス",
+                    tags=[person_name, theme, "教養", "ビジネス", "偉人"],
+                    category_id=settings.youtube_default_category,
+                    privacy_status=privacy_status,
+                )
+
+                video_id = await self.youtube_uploader.upload_video(
+                    video_file, metadata
+                )
+                youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+
+                # Set thumbnail if generated
+                if thumbnail_file and thumbnail_file.exists():
+                    await self.youtube_uploader.set_thumbnail(video_id, thumbnail_file)
+
+                if self.discord_notifier:
+                    await self.discord_notifier.notify_youtube_uploaded(
+                        video_id, metadata.title, privacy_status
+                    )
+
+            # Step 8: Upload to Google Drive (optional)
+            drive_url = None
+            if upload_to_drive and self.drive_manager and self.enable_drive:
+                file_info = await self.drive_manager.upload_file(
+                    video_file,
+                    file_name=f"{person_name}_{theme}.mp4",
+                )
+                drive_url = file_info["url"]
+                file_size_mb = file_info["size"] / (1024 * 1024)
+
+                if self.discord_notifier:
+                    await self.discord_notifier.notify_drive_uploaded(
+                        file_info["name"], drive_url, file_size_mb
+                    )
+
+            # Step 9: Log to Google Sheets (optional)
+            if self.sheets_manager and self.enable_sheets:
+                generation_time = time.time() - start_time
+                await self.sheets_manager.log_video_production(
+                    person_name=person_name,
+                    theme=theme,
+                    video_duration=audio_duration,
+                    generation_time=generation_time,
+                    youtube_url=youtube_url,
+                    drive_url=drive_url,
+                    project_path=str(project_dir),
+                )
+
+            # Step 10: Send completion notification
+            if self.discord_notifier:
+                await self.discord_notifier.notify_video_completed(
+                    person_name=person_name,
+                    theme=theme,
+                    output_path=str(video_file),
+                    duration=audio_duration,
+                    youtube_url=youtube_url,
+                    drive_url=drive_url,
+                )
+
+            # Return results
+            total_time = time.time() - start_time
+            logger.info(
+                f"Video workflow completed successfully in {total_time:.1f} seconds"
+            )
+
+            return {
+                "success": True,
+                "project_dir": str(project_dir),
+                "video_file": str(video_file),
+                "thumbnail_file": str(thumbnail_file) if thumbnail_file else None,
+                "youtube_url": youtube_url,
+                "youtube_video_id": video_id,
+                "drive_url": drive_url,
+                "duration_seconds": audio_duration,
+                "generation_time_seconds": total_time,
+            }
+
+        except Exception as e:
+            logger.error(f"Video workflow failed: {e}")
+
+            # Send error notification
+            if self.discord_notifier:
+                await self.discord_notifier.notify_error(
+                    str(e), context=f"{person_name} - {theme}"
+                )
+
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    async def update_task_in_sheets(
+        self, task_id: str, status: str, notes: str | None = None
+    ) -> bool:
+        """
+        Update task status in Google Sheets.
+
+        Args:
+            task_id: Task ID (e.g., "YT-001")
+            status: New status
+            notes: Additional notes
+
+        Returns:
+            True if successful
+        """
+        if not self.sheets_manager or not self.enable_sheets:
+            logger.warning("Google Sheets not enabled, skipping task update")
+            return False
+
+        from datetime import datetime
+
+        completion_date = (
+            datetime.now().strftime("%Y-%m-%d") if status == "完了" else None
+        )
+
+        return await self.sheets_manager.update_task_status(
+            task_id=task_id,
+            status=status,
+            completion_date=completion_date,
+            notes=notes,
+        )
+
+    async def get_production_stats(self) -> dict[str, Any]:
+        """
+        Get video production statistics from Google Sheets.
+
+        Returns:
+            Statistics dictionary
+        """
+        if not self.sheets_manager or not self.enable_sheets:
+            logger.warning("Google Sheets not enabled")
+            return {}
+
+        return await self.sheets_manager.get_video_stats()

@@ -1,0 +1,143 @@
+name: Auto Generate Data-Driven Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "Target video length in minutes (>=5)"
+        required: false
+        default: "15"
+
+jobs:
+  generate:
+    # Require a self-hosted Windows runner with VOICEVOX installed.
+    runs-on: [self-hosted, Windows, voicevox]
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || '15' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Write client_secrets.json
+        if: ${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 != '' }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes(
+            "client_secrets.json",
+            [Convert]::FromBase64String("${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}")
+          )
+
+      - name: Write token.json (optional, YouTube refresh token)
+        if: ${{ secrets.YOUTUBE_TOKEN_JSON_B64 != '' }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes(
+            "token.json",
+            [Convert]::FromBase64String("${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}")
+          )
+
+      - name: Write Google token (optional, Drive/Sheets refresh token)
+        if: ${{ secrets.GOOGLE_TOKEN_JSON_B64 != '' }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes(
+            "google_token.json",
+            [Convert]::FromBase64String("${{ secrets.GOOGLE_TOKEN_JSON_B64 }}")
+          )
+
+      - name: Generate .env from secrets
+        shell: pwsh
+        run: |
+          @"
+APP_ENV=production
+DEBUG=false
+
+# AI
+OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+
+# Image / KIEAI
+USE_KIEAI=true
+KIEAI_API_KEY=${{ secrets.KIEAI_API_KEY }}
+KIEAI_API_URL=https://api.kie.ai/api/v1
+KIEAI_MODEL=google/nano-banana
+USE_THUMBNAIL_GENERATION=true
+SKIP_THUMBNAIL_GENERATION=false
+THUMBNAIL_PROVIDER=nanobanana
+NANOBANANA_API_KEY=${{ secrets.NANOBANANA_API_KEY }}
+NANOBANANA_API_URL=https://api.nanobanana.ai/v1
+
+# VOICEVOX
+VOICEVOX_API_URL=http://localhost:50021
+VOICEVOX_SPEAKER_ID=13
+
+# YouTube
+YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
+YOUTUBE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload
+YOUTUBE_DEFAULT_CATEGORY=22
+YOUTUBE_DEFAULT_PRIVACY=public
+
+# Google Drive / Sheets
+GOOGLE_CLIENT_SECRETS_FILE=client_secrets.json
+GOOGLE_DRIVE_FOLDER_ID=${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+GOOGLE_SHEETS_ID=${{ secrets.GOOGLE_SHEETS_ID }}
+
+# Discord
+DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}
+
+# Paths
+DATA_DIR=./data
+PROJECTS_DIR=./data/projects
+TEMPLATES_DIR=./data/templates
+DEFAULT_LLM_MODEL=models/gemini-pro-latest
+DEFAULT_SCRIPT_LENGTH=15
+DEFAULT_TEMPERATURE=0.7
+"@ | Out-File -Encoding utf8 .env
+
+      - name: Ensure VOICEVOX is running
+        shell: pwsh
+        run: |
+          $exe = if ("${{ secrets.VOICEVOX_EXE_PATH }}") { "${{ secrets.VOICEVOX_EXE_PATH }}" } else { "D:\App\VOICEVOX\VOICEVOX.exe" }
+          $port = 50021
+          $listening = (Test-NetConnection -ComputerName "localhost" -Port $port).TcpTestSucceeded
+          if (-not $listening) {
+            Write-Host "Starting VOICEVOX at $exe"
+            Start-Process -FilePath $exe -ArgumentList "--disable-gpu" -WindowStyle Hidden
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 2
+              if ((Test-NetConnection -ComputerName "localhost" -Port $port).TcpTestSucceeded) { break }
+            }
+          }
+          if (-not (Test-NetConnection -ComputerName "localhost" -Port $port).TcpTestSucceeded) {
+            throw "VOICEVOX API not reachable on port $port"
+          }
+
+      - name: Run data-driven generation
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python generate_data_driven_video.py auto $env:DURATION_MINUTES
+
+      - name: Upload artifacts (video & assets)
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-video
+          path: |
+            data/projects/*/video/*.mp4
+            data/projects/*/images/*
+            data/projects/*/metadata.json
+          if-no-files-found: warn

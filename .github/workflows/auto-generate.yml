@@ -59,52 +59,52 @@ jobs:
       - name: Generate .env from secrets
         shell: pwsh
         run: |
-          $envContent = @"
-          APP_ENV=production
-          DEBUG=false
+          $envContent = @'
+APP_ENV=production
+DEBUG=false
 
-          # AI
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+# AI
+OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
 
-          # Image / KIEAI
-          USE_KIEAI=true
-          KIEAI_API_KEY=${{ secrets.KIEAI_API_KEY }}
-          KIEAI_API_URL=https://api.kie.ai/api/v1
-          KIEAI_MODEL=google/nano-banana
-          USE_THUMBNAIL_GENERATION=true
-          SKIP_THUMBNAIL_GENERATION=false
-          THUMBNAIL_PROVIDER=nanobanana
-          NANOBANANA_API_KEY=${{ secrets.NANOBANANA_API_KEY }}
-          NANOBANANA_API_URL=https://api.nanobanana.ai/v1
+# Image / KIEAI
+USE_KIEAI=true
+KIEAI_API_KEY=${{ secrets.KIEAI_API_KEY }}
+KIEAI_API_URL=https://api.kie.ai/api/v1
+KIEAI_MODEL=google/nano-banana
+USE_THUMBNAIL_GENERATION=true
+SKIP_THUMBNAIL_GENERATION=false
+THUMBNAIL_PROVIDER=nanobanana
+NANOBANANA_API_KEY=${{ secrets.NANOBANANA_API_KEY }}
+NANOBANANA_API_URL=https://api.nanobanana.ai/v1
 
-          # VOICEVOX
-          VOICEVOX_API_URL=http://localhost:50021
-          VOICEVOX_SPEAKER_ID=13
+# VOICEVOX
+VOICEVOX_API_URL=http://localhost:50021
+VOICEVOX_SPEAKER_ID=13
 
-          # YouTube
-          YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
-          YOUTUBE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload
-          YOUTUBE_DEFAULT_CATEGORY=22
-          YOUTUBE_DEFAULT_PRIVACY=public
+# YouTube
+YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
+YOUTUBE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload
+YOUTUBE_DEFAULT_CATEGORY=22
+YOUTUBE_DEFAULT_PRIVACY=public
 
-          # Google Drive / Sheets
-          GOOGLE_CLIENT_SECRETS_FILE=client_secrets.json
-          GOOGLE_DRIVE_FOLDER_ID=${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-          GOOGLE_SHEETS_ID=${{ secrets.GOOGLE_SHEETS_ID }}
+# Google Drive / Sheets
+GOOGLE_CLIENT_SECRETS_FILE=client_secrets.json
+GOOGLE_DRIVE_FOLDER_ID=${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+GOOGLE_SHEETS_ID=${{ secrets.GOOGLE_SHEETS_ID }}
 
-          # Discord
-          DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}
+# Discord
+DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}
 
-          # Paths
-          DATA_DIR=./data
-          PROJECTS_DIR=./data/projects
-          TEMPLATES_DIR=./data/templates
-          DEFAULT_LLM_MODEL=models/gemini-pro-latest
-          DEFAULT_SCRIPT_LENGTH=15
-          DEFAULT_TEMPERATURE=0.7
-"@
+# Paths
+DATA_DIR=./data
+PROJECTS_DIR=./data/projects
+TEMPLATES_DIR=./data/templates
+DEFAULT_LLM_MODEL=models/gemini-pro-latest
+DEFAULT_SCRIPT_LENGTH=15
+DEFAULT_TEMPERATURE=0.7
+'@
           Set-Content -Path ".env" -Value $envContent -Encoding UTF8
 
       - name: Ensure VOICEVOX is running

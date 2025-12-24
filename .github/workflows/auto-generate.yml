@@ -104,7 +104,6 @@ jobs:
           DEFAULT_LLM_MODEL=models/gemini-pro-latest
           DEFAULT_SCRIPT_LENGTH=15
           DEFAULT_TEMPERATURE=0.7
-'@
           Set-Content -Path ".env" -Value $envContent -Encoding UTF8
 
       - name: Ensure VOICEVOX is running

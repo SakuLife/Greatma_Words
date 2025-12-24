@@ -1,0 +1,22 @@
+name: voicevox-debug
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start VOICEVOX Engine
+        run: |
+          docker pull voicevox/voicevox_engine:cpu-latest
+          docker run -d --rm \
+            --name voicevox_engine \
+            -p 50021:50021 \
+            voicevox/voicevox_engine:cpu-latest
+
+      - name: Diagnose
+        run: |
+          docker ps -a
+          docker logs --tail 50 voicevox_engine || true
+          curl -v http://127.0.0.1:50021/version || true

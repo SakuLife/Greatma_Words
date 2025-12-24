@@ -10,7 +10,8 @@ on:
 
 jobs:
   generate:
-    # Self-hosted runner required. Ensure VOICEVOX is installed and reachable at http://localhost:50021.
+    # Self-hosted runner required. Docker must be installed and running.
+    # VOICEVOX will be started automatically via docker-compose.
     runs-on: self-hosted
     env:
       PYTHONUTF8: "1"
@@ -28,6 +29,13 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Check Docker availability
+        shell: pwsh
+        run: |
+          Write-Host "Checking Docker..."
+          docker --version
+          docker-compose --version
 
       - name: Write client_secrets.json
         shell: pwsh
@@ -109,23 +117,29 @@ jobs:
           DEFAULT_TEMPERATURE=0.7
           Set-Content -Path ".env" -Value $envContent -Encoding UTF8
 
-      - name: Ensure VOICEVOX is running
+      - name: Start VOICEVOX with Docker
         shell: pwsh
         run: |
-          $exe = if ("${{ secrets.VOICEVOX_EXE_PATH }}") { "${{ secrets.VOICEVOX_EXE_PATH }}" } else { "D:\App\VOICEVOX\VOICEVOX.exe" }
+          # Docker Composeでvoicevoxを起動
+          docker-compose up -d voicevox
+
+          # APIが利用可能になるまで待機(最大60秒)
           $port = 50021
-          $listening = (Test-NetConnection -ComputerName "localhost" -Port $port).TcpTestSucceeded
-          if (-not $listening) {
-            Write-Host "Starting VOICEVOX at $exe"
-            Start-Process -FilePath $exe -ArgumentList "--disable-gpu" -WindowStyle Hidden
-            for ($i = 0; $i -lt 30; $i++) {
-              Start-Sleep -Seconds 2
-              if ((Test-NetConnection -ComputerName "localhost" -Port $port).TcpTestSucceeded) { break }
+          $maxAttempts = 30
+          Write-Host "Waiting for VOICEVOX API to be ready..."
+          for ($i = 0; $i -lt $maxAttempts; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              $response = Invoke-WebRequest -Uri "http://localhost:$port/version" -TimeoutSec 2 -ErrorAction Stop
+              if ($response.StatusCode -eq 200) {
+                Write-Host "VOICEVOX API is ready!"
+                exit 0
+              }
+            } catch {
+              Write-Host "Attempt $($i+1)/$maxAttempts - Waiting for API..."
             }
           }
-          if (-not (Test-NetConnection -ComputerName "localhost" -Port $port).TcpTestSucceeded) {
-            throw "VOICEVOX API not reachable on port $port"
-          }
+          throw "VOICEVOX API did not become ready within 60 seconds"
 
       - name: Run data-driven generation
         shell: pwsh
@@ -144,3 +158,9 @@ jobs:
             data/projects/*/images/*
             data/projects/*/metadata.json
           if-no-files-found: warn
+
+      - name: Stop VOICEVOX
+        if: always()
+        shell: pwsh
+        run: |
+          docker-compose down

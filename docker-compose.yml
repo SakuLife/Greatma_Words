@@ -1,0 +1,11 @@
+version: "3.8"
+
+services:
+  voicevox:
+    image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest
+    ports:
+      - "50021:50021"
+    environment:
+      - TZ=Asia/Tokyo
+    # GPUを使わない設定(GitHub Actions対応)
+    # より高速化したい場合は voicevox/voicevox_engine:gpu-latest を使用

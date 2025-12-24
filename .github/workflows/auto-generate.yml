@@ -30,31 +30,34 @@ jobs:
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
 
       - name: Write client_secrets.json
-        if: ${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 != '' }}
         shell: pwsh
         run: |
-          [IO.File]::WriteAllBytes(
-            "client_secrets.json",
-            [Convert]::FromBase64String("${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}")
-          )
+          if ("${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" -ne "") {
+            [IO.File]::WriteAllBytes(
+              "client_secrets.json",
+              [Convert]::FromBase64String("${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}")
+            )
+          }
 
       - name: Write token.json (optional, YouTube refresh token)
-        if: ${{ secrets.YOUTUBE_TOKEN_JSON_B64 != '' }}
         shell: pwsh
         run: |
-          [IO.File]::WriteAllBytes(
-            "token.json",
-            [Convert]::FromBase64String("${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}")
-          )
+          if ("${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" -ne "") {
+            [IO.File]::WriteAllBytes(
+              "token.json",
+              [Convert]::FromBase64String("${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}")
+            )
+          }
 
       - name: Write Google token (optional, Drive/Sheets refresh token)
-        if: ${{ secrets.GOOGLE_TOKEN_JSON_B64 != '' }}
         shell: pwsh
         run: |
-          [IO.File]::WriteAllBytes(
-            "google_token.json",
-            [Convert]::FromBase64String("${{ secrets.GOOGLE_TOKEN_JSON_B64 }}")
-          )
+          if ("${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" -ne "") {
+            [IO.File]::WriteAllBytes(
+              "google_token.json",
+              [Convert]::FromBase64String("${{ secrets.GOOGLE_TOKEN_JSON_B64 }}")
+            )
+          }
 
       - name: Generate .env from secrets
         shell: pwsh

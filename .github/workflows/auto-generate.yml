@@ -10,8 +10,8 @@ on:
 
 jobs:
   generate:
-    # Require a self-hosted Windows runner with VOICEVOX installed.
-    runs-on: [self-hosted, Windows, voicevox]
+    # Self-hosted runner required. Ensure VOICEVOX is installed and reachable at http://localhost:50021.
+    runs-on: self-hosted
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"

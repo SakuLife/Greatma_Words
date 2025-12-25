@@ -76,8 +76,9 @@ jobs:
           USE_THUMBNAIL_GENERATION=true
           SKIP_THUMBNAIL_GENERATION=false
           THUMBNAIL_PROVIDER=nanobanana
-          NANOBANANA_API_KEY=${{ secrets.NANOBANANA_API_KEY }}
-          NANOBANANA_API_URL=https://api.nanobanana.ai/v1
+          # Use KIEAI for thumbnail generation (nano-banana model)
+          NANOBANANA_API_KEY=${{ secrets.KIEAI_API_KEY }}
+          NANOBANANA_API_URL=https://api.kie.ai/api/v1
 
           # VOICEVOX
           VOICEVOX_API_URL=http://localhost:50021

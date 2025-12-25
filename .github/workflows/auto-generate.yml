@@ -10,9 +10,9 @@ on:
 
 jobs:
   generate:
-    # Self-hosted runner required. Docker must be installed and running.
-    # VOICEVOX will be started automatically via docker-compose.
-    runs-on: self-hosted
+    # GitHub-hosted runner - runs on GitHub's servers, no local PC needed
+    # Docker is pre-installed, VOICEVOX will start automatically
+    runs-on: ubuntu-latest
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
@@ -31,46 +31,32 @@ jobs:
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
 
       - name: Check Docker availability
-        shell: pwsh
         run: |
-          Write-Host "Checking Docker..."
+          echo "Checking Docker..."
           docker --version
-          docker-compose --version
+          docker compose version
 
       - name: Write client_secrets.json
-        shell: pwsh
         run: |
-          if ("${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" -ne "") {
-            [IO.File]::WriteAllBytes(
-              "client_secrets.json",
-              [Convert]::FromBase64String("${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}")
-            )
-          }
+          if [ -n "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" ]; then
+            echo "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" | base64 -d > client_secrets.json
+          fi
 
       - name: Write token.json (optional, YouTube refresh token)
-        shell: pwsh
         run: |
-          if ("${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" -ne "") {
-            [IO.File]::WriteAllBytes(
-              "token.json",
-              [Convert]::FromBase64String("${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}")
-            )
-          }
+          if [ -n "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" ]; then
+            echo "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" | base64 -d > token.json
+          fi
 
       - name: Write Google token (optional, Drive/Sheets refresh token)
-        shell: pwsh
         run: |
-          if ("${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" -ne "") {
-            [IO.File]::WriteAllBytes(
-              "google_token.json",
-              [Convert]::FromBase64String("${{ secrets.GOOGLE_TOKEN_JSON_B64 }}")
-            )
-          }
+          if [ -n "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" ]; then
+            echo "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | base64 -d > google_token.json
+          fi
 
       - name: Generate .env from secrets
-        shell: pwsh
         run: |
-          $envContent = @'
+          cat > .env << 'EOF'
           APP_ENV=production
           DEBUG=false
 
@@ -115,39 +101,32 @@ jobs:
           DEFAULT_LLM_MODEL=models/gemini-pro-latest
           DEFAULT_SCRIPT_LENGTH=15
           DEFAULT_TEMPERATURE=0.7
-          Set-Content -Path ".env" -Value $envContent -Encoding UTF8
+          EOF
 
       - name: Start VOICEVOX with Docker
-        shell: pwsh
         run: |
-          # Docker Composeでvoicevoxを起動
-          docker-compose up -d voicevox
+          # Start VOICEVOX with Docker Compose
+          docker compose up -d voicevox
 
-          # APIが利用可能になるまで待機(最大60秒)
-          $port = 50021
-          $maxAttempts = 30
-          Write-Host "Waiting for VOICEVOX API to be ready..."
-          for ($i = 0; $i -lt $maxAttempts; $i++) {
-            Start-Sleep -Seconds 2
-            try {
-              $response = Invoke-WebRequest -Uri "http://localhost:$port/version" -TimeoutSec 2 -ErrorAction Stop
-              if ($response.StatusCode -eq 200) {
-                Write-Host "VOICEVOX API is ready!"
-                exit 0
-              }
-            } catch {
-              Write-Host "Attempt $($i+1)/$maxAttempts - Waiting for API..."
-            }
-          }
-          throw "VOICEVOX API did not become ready within 60 seconds"
+          # Wait for API to be ready (max 60 seconds)
+          echo "Waiting for VOICEVOX API to be ready..."
+          for i in {1..30}; do
+            sleep 2
+            if curl -s http://localhost:50021/version > /dev/null 2>&1; then
+              echo "VOICEVOX API is ready!"
+              exit 0
+            fi
+            echo "Attempt $i/30 - Waiting for API..."
+          done
+          echo "VOICEVOX API did not become ready within 60 seconds"
+          exit 1
 
       - name: Run data-driven generation
-        shell: pwsh
         env:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
         run: |
-          python generate_data_driven_video.py auto $env:DURATION_MINUTES
+          python generate_data_driven_video.py auto ${{ env.DURATION_MINUTES }}
 
       - name: Upload artifacts (video & assets)
         uses: actions/upload-artifact@v4
@@ -161,6 +140,5 @@ jobs:
 
       - name: Stop VOICEVOX
         if: always()
-        shell: pwsh
         run: |
-          docker-compose down
+          docker compose down

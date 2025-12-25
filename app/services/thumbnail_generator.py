@@ -117,7 +117,9 @@ class ThumbnailGenerator:
             response.raise_for_status()
             result = response.json()
 
-            task_id = result.get("id") or result.get("task_id") or result.get("taskId")
+            logger.info(f"KIE AI createTask response: {result}")
+
+            task_id = result.get("id") or result.get("task_id") or result.get("taskId") or result.get("data", {}).get("id")
             if not task_id:
                 raise ValueError(f"No task ID in response: {result}")
 
@@ -136,17 +138,23 @@ class ThumbnailGenerator:
                 status_response.raise_for_status()
                 status_result = status_response.json()
 
-                status = status_result.get("status")
-                logger.debug(f"Task {task_id} status: {status} (attempt {attempt + 1}/{max_attempts})")
+                status = status_result.get("status") or status_result.get("data", {}).get("status")
+                logger.info(f"Task {task_id} status: {status} (attempt {attempt + 1}/{max_attempts})")
+                if attempt == 0:  # 最初の1回だけ全レスポンスをログ
+                    logger.info(f"KIE AI status response: {status_result}")
 
                 if status == "completed" or status == "success":
-                    # 画像URLを取得
+                    # 画像URLを取得（KIE AIの色々なレスポンスフォーマットに対応）
                     image_url = (
                         status_result.get("result", {}).get("url")
                         or status_result.get("output", {}).get("url")
+                        or status_result.get("data", {}).get("result", {}).get("url")
+                        or status_result.get("data", {}).get("output", {}).get("url")
                         or status_result.get("image_url")
                         or status_result.get("url")
                     )
+
+                    logger.info(f"Extracted image_url: {image_url}")
 
                     if not image_url:
                         raise ValueError(f"No image URL in completed task: {status_result}")

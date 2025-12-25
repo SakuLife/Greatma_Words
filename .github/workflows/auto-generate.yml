@@ -39,19 +39,19 @@ jobs:
       - name: Write client_secrets.json
         run: |
           if [ -n "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" ]; then
-            echo "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" | base64 -d > client_secrets.json
+            echo -n "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" | base64 -d > client_secrets.json
           fi
 
       - name: Write token.json (optional, YouTube refresh token)
         run: |
           if [ -n "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" ]; then
-            echo "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" | base64 -d > token.json
+            echo -n "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" | base64 -d > token.json
           fi
 
       - name: Write Google token (optional, Drive/Sheets refresh token)
         run: |
           if [ -n "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" ]; then
-            echo "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | base64 -d > google_token.json
+            echo -n "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | base64 -d > google_token.json
           fi
 
       - name: Generate .env from secrets

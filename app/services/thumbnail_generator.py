@@ -76,64 +76,106 @@ class ThumbnailGenerator:
     async def _generate_with_nanobanana(
         self, person_name: str, topic: str, output_path: Path, style: str, quote: str | None = None
     ) -> Path:
-        """Generate thumbnail using Nanobanana Pro API."""
+        """Generate thumbnail using KIE AI API (nano-banana-pro model)."""
         if not self.nanobanana_api_key:
             logger.warning(
-                "Nanobanana API key not configured, falling back to DALL-E"
+                "KIE AI API key not configured, falling back to DALL-E"
             )
             return await self._generate_with_dalle(person_name, topic, output_path, style, quote)
 
         try:
-            # Nanobanana Pro用のプロンプト作成
-            prompt = self._create_thumbnail_prompt(person_name, topic, style)
+            import time
 
-            # Nanobanana Pro API呼び出し
-            # 注意: 実際のAPI仕様に合わせて調整が必要
+            # プロンプト作成
+            prompt = self._create_thumbnail_prompt(person_name, topic, style)
+            logger.info(f"KIE AI thumbnail prompt: {prompt}")
+
+            # KIE AI API: タスク作成
             headers = {
                 "Authorization": f"Bearer {self.nanobanana_api_key}",
                 "Content-Type": "application/json",
             }
 
+            # KIE AI API仕様に合わせたペイロード
             payload = {
-                "prompt": prompt,
-                "width": 1280,
-                "height": 720,  # YouTubeサムネイルサイズ
-                "style": style,
-                "quality": "high",
+                "model": "nano-banana-pro",
+                "input": {
+                    "prompt": prompt,
+                    "aspect_ratio": "16:9",  # YouTubeサムネイル
+                    "resolution": "2K",  # 高解像度
+                    "output_format": "png",
+                },
             }
 
+            # タスク作成
             response = requests.post(
-                f"{self.nanobanana_api_url}/generate",
+                f"{self.nanobanana_api_url}/jobs/createTask",
                 json=payload,
                 headers=headers,
                 timeout=60,
             )
             response.raise_for_status()
-
             result = response.json()
 
-            # 画像URLを取得（API仕様に応じて調整）
-            image_url = result.get("image_url") or result.get("url")
+            task_id = result.get("id") or result.get("task_id") or result.get("taskId")
+            if not task_id:
+                raise ValueError(f"No task ID in response: {result}")
 
-            if not image_url:
-                raise ValueError("No image URL in API response")
+            logger.info(f"KIE AI task created: {task_id}")
 
-            # 画像をダウンロード
-            img_response = requests.get(image_url, timeout=30)
-            img_response.raise_for_status()
+            # ポーリングでタスク完了を待つ
+            max_attempts = 60  # 最大60回（約5分）
+            for attempt in range(max_attempts):
+                time.sleep(5)  # 5秒待機
 
-            # 保存
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(output_path, "wb") as f:
-                f.write(img_response.content)
+                status_response = requests.get(
+                    f"{self.nanobanana_api_url}/jobs/{task_id}",
+                    headers=headers,
+                    timeout=30,
+                )
+                status_response.raise_for_status()
+                status_result = status_response.json()
 
-            # テキストオーバーレイを追加（必要に応じて）
-            self._add_text_overlay(output_path, person_name, topic, quote)
+                status = status_result.get("status")
+                logger.debug(f"Task {task_id} status: {status} (attempt {attempt + 1}/{max_attempts})")
 
-            return output_path
+                if status == "completed" or status == "success":
+                    # 画像URLを取得
+                    image_url = (
+                        status_result.get("result", {}).get("url")
+                        or status_result.get("output", {}).get("url")
+                        or status_result.get("image_url")
+                        or status_result.get("url")
+                    )
+
+                    if not image_url:
+                        raise ValueError(f"No image URL in completed task: {status_result}")
+
+                    logger.info(f"KIE AI image URL: {image_url}")
+
+                    # 画像をダウンロード
+                    img_response = requests.get(image_url, timeout=30)
+                    img_response.raise_for_status()
+
+                    # 保存
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(output_path, "wb") as f:
+                        f.write(img_response.content)
+
+                    # テキストオーバーレイを追加
+                    self._add_text_overlay(output_path, person_name, topic, quote)
+
+                    logger.info(f"Thumbnail saved: {output_path}")
+                    return output_path
+
+                elif status == "failed" or status == "error":
+                    error_msg = status_result.get("error") or status_result.get("message") or "Unknown error"
+                    raise ValueError(f"Task failed: {error_msg}")
+
+            raise TimeoutError(f"Task {task_id} did not complete within {max_attempts * 5} seconds")
 
         except Exception as e:
-            logger.error(f"Nanobanana generation failed: {e}")
+            logger.error(f"KIE AI generation failed: {e}")
             logger.info("Falling back to DALL-E")
             return await self._generate_with_dalle(person_name, topic, output_path, style, quote)
 

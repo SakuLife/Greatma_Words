@@ -37,21 +37,24 @@ jobs:
           docker compose version
 
       - name: Write client_secrets.json
+        continue-on-error: true
         run: |
           if [ -n "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" ]; then
-            printf '%s' "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" | tr -d '\n\r' | base64 -d > client_secrets.json
+            printf '%s' "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" | tr -d '\n\r' | base64 -d > client_secrets.json || echo "Failed to decode client_secrets, skipping..."
           fi
 
       - name: Write token.json (optional, YouTube refresh token)
+        continue-on-error: true
         run: |
           if [ -n "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" ]; then
-            printf '%s' "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > token.json
+            printf '%s' "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > token.json || echo "Failed to decode token.json, skipping..."
           fi
 
       - name: Write Google token (optional, Drive/Sheets refresh token)
+        continue-on-error: true
         run: |
           if [ -n "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" ]; then
-            printf '%s' "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > google_token.json
+            printf '%s' "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > google_token.json || echo "Failed to decode google_token, skipping..."
           fi
 
       - name: Generate .env from secrets

@@ -129,7 +129,9 @@ jobs:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
         run: |
-          python generate_data_driven_video.py auto ${{ env.DURATION_MINUTES }}
+          # Use manual mode to skip YouTube authentication
+          # Format: python generate_data_driven_video.py manual "Person" "Topic" duration
+          python generate_data_driven_video.py manual "スティーブ・ジョブズ" "イノベーションと創造性" ${{ env.DURATION_MINUTES }}
 
       - name: Upload artifacts (video & assets)
         uses: actions/upload-artifact@v4

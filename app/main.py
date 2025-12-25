@@ -19,6 +19,7 @@ from app.services.thumbnail_generator import ThumbnailGenerator
 from app.services.voice_synthesizer import VoiceSynthesizer
 from app.services.video_creator import VideoCreator
 from app.services.youtube_uploader import YouTubeUploader
+from app.services.description_generator import DescriptionGenerator
 from app.utils.file_manager import FileManager
 from app.utils.logger import logger
 from app.utils.voicevox_launcher import launcher as voicevox_launcher
@@ -36,6 +37,7 @@ class VideoGenerationOrchestrator:
         self.voice_synthesizer = VoiceSynthesizer()
         self.video_creator = VideoCreator()
         self.youtube_uploader = YouTubeUploader()
+        self.description_generator = DescriptionGenerator()
 
     async def generate_complete_video(
         self, config: GenerationConfig
@@ -193,11 +195,16 @@ class VideoGenerationOrchestrator:
 
                 thumbnail_path = self.file_manager.get_thumbnail_path(project)
 
+                # サムネイル用の名言を抽出
+                catchphrase = self.description_generator.extract_catchphrase(script)
+                logger.info(f"Extracted catchphrase for thumbnail: {catchphrase}")
+
                 await self.thumbnail_generator.generate_thumbnail(
                     person_name=config.person_name,
                     topic=config.topic,
                     output_path=thumbnail_path,
                     style="professional",
+                    quote=catchphrase,
                 )
 
                 project.thumbnail_path = thumbnail_path
@@ -499,37 +506,26 @@ class VideoGenerationOrchestrator:
 
         return False
 
-    @staticmethod
-    def _generate_video_description(script, config: GenerationConfig) -> str:
+    def _generate_video_description(self, script, config: GenerationConfig) -> str:
         """Generate YouTube video description from script."""
-        description = f"""
-{config.person_name}の哲学を深く掘り下げる動画です。
+        # 音声ファイルから動画の長さを取得
+        try:
+            from pydub import AudioSegment
+            # プロジェクトから音声ファイルのパスを推測
+            # (この時点では完全なvideoがまだ生成されていない可能性があるため、durationは推定値を使用)
+            video_duration_seconds = script.total_duration_minutes * 60
+        except Exception:
+            video_duration_seconds = script.total_duration_minutes * 60
 
-【テーマ】
-{config.topic}
+        # 新しいDescriptionGeneratorを使用して説明文を生成
+        description = self.description_generator.generate_description(
+            script=script,
+            person_name=config.person_name,
+            topic=config.topic,
+            video_duration_seconds=video_duration_seconds,
+        )
 
-【目次】
-"""
-
-        # Add chapter markers
-        current_time = 0
-        for section in script.sections:
-            minutes = int(current_time // 60)
-            seconds = int(current_time % 60)
-            description += f"{minutes:02d}:{seconds:02d} - {section.title}\n"
-            current_time += section.duration_seconds
-
-        description += """
-【チャンネルについて】
-このチャンネルでは、偉人の言葉や哲学を分かりやすく解説しています。
-AI時代を生き抜くための知恵を、あなたにお届けします。
-
-チャンネル登録・高評価お願いします！
-
-#教養 #YouTube #哲学 #AI時代
-"""
-
-        return description.strip()
+        return description
 
 
 # Global orchestrator instance

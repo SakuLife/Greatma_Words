@@ -49,6 +49,7 @@ class ScriptGenerator:
         duration_minutes: int = 15,
         model: str | None = None,
         temperature: float | None = None,
+        additional_context: str | None = None,
     ) -> VideoScript:
         """
         Generate a video script using LLM API.
@@ -59,6 +60,7 @@ class ScriptGenerator:
             duration_minutes: Target duration in minutes
             model: LLM model to use (defaults to config setting)
             temperature: Temperature for generation (defaults to config setting)
+            additional_context: Additional context for script generation (e.g., channel analytics)
 
         Returns:
             Generated VideoScript instance
@@ -76,7 +78,7 @@ class ScriptGenerator:
         )
 
         # Prepare prompt
-        prompt = self._prepare_prompt(topic, person_name, duration_minutes)
+        prompt = self._prepare_prompt(topic, person_name, duration_minutes, additional_context)
 
         # Generate using appropriate API
         if "gpt" in model.lower():
@@ -191,12 +193,17 @@ class ScriptGenerator:
             raise RuntimeError(f"Gemini API error: {e}") from e
 
     def _prepare_prompt(
-        self, topic: str, person_name: str, duration_minutes: int
+        self, topic: str, person_name: str, duration_minutes: int, additional_context: str | None = None
     ) -> str:
         """Prepare the prompt by substituting template variables."""
         prompt = self.prompt_template.replace("{{TOPIC}}", topic)
         prompt = prompt.replace("{{PERSON_NAME}}", person_name)
         prompt = prompt.replace("{{DURATION_MINUTES}}", str(duration_minutes))
+
+        # Add additional context if provided
+        if additional_context:
+            prompt = f"{additional_context}\n\n{prompt}"
+
         return prompt
 
     @staticmethod

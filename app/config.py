@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     # YouTube API
     youtube_client_secrets_file: str = "client_secrets.json"
-    youtube_oauth_scopes: str = "https://www.googleapis.com/auth/youtube.upload"
+    youtube_oauth_scopes: str = "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload"
     youtube_default_category: int = 22  # People & Blogs
     youtube_default_privacy: Literal["public", "private", "unlisted"] = "private"
 

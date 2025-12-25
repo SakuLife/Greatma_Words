@@ -21,7 +21,11 @@ class YouTubeUploader:
 
     def __init__(self):
         """Initialize YouTube uploader."""
-        self.scopes = [settings.youtube_oauth_scopes]
+        # Accept scopes as space-delimited string in settings and normalize to list
+        if isinstance(settings.youtube_oauth_scopes, str):
+            self.scopes = settings.youtube_oauth_scopes.split()
+        else:
+            self.scopes = list(settings.youtube_oauth_scopes)
         self.client_secrets_file = settings.youtube_client_secrets_file
         self.credentials = None
         self.youtube_service = None

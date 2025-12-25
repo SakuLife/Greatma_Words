@@ -95,8 +95,8 @@ class VideoWorkflow:
 
         try:
             # Step 1: Create project structure
-            project_info = self.file_manager.create_project(person_name, theme)
-            project_dir = Path(project_info["project_dir"])
+            project = self.file_manager.create_project(theme, person_name)
+            project_dir = project.project_dir
 
             # Step 2: Generate script
             logger.info("Step 1/6: Generating script...")
@@ -105,45 +105,36 @@ class VideoWorkflow:
                     "動画生成", 1, 6, "台本生成中..."
                 )
 
-            script_file = await self.script_generator.generate_script(
+            script = await self.script_generator.generate_script(
+                topic=theme,
                 person_name=person_name,
-                theme=theme,
-                target_duration=target_duration,
-                output_path=project_dir / "script.json",
+                duration_minutes=target_duration,
             )
 
-            # Read script for word count
+            # Save script to file
             import json
 
-            with open(script_file, "r", encoding="utf-8") as f:
-                script_data = json.load(f)
-                word_count = sum(len(slide["text"]) for slide in script_data["slides"])
+            script_file = project_dir / "script.json"
+            with open(script_file, "w", encoding="utf-8") as f:
+                json.dump(script.model_dump(), f, indent=2, ensure_ascii=False)
+
+            # Calculate word count
+            word_count = sum(len(section.narration) for section in script.sections)
 
             if self.discord_notifier:
                 await self.discord_notifier.notify_script_completed(
                     person_name, word_count
                 )
 
-            # Step 3: Generate images
-            logger.info("Step 2/6: Generating images...")
+            # Step 3: Skip image generation for now (TODO: implement later)
+            logger.info("Step 2/6: Skipping image generation...")
             if self.discord_notifier:
                 await self.discord_notifier.notify_task_progress(
-                    "動画生成", 2, 6, "画像生成中..."
+                    "動画生成", 2, 6, "画像生成をスキップ"
                 )
 
-            if not settings.skip_image_generation:
-                image_paths = await self.image_generator.generate_images_from_script(
-                    script_file, project_dir / "images"
-                )
-                image_count = len(image_paths)
-            else:
-                logger.info("Skipping image generation (using existing images)")
-                image_count = 0
-
-            if self.discord_notifier:
-                await self.discord_notifier.notify_image_completed(
-                    person_name, image_count
-                )
+            image_count = 0
+            logger.info("Image generation skipped - will use default images")
 
             # Step 4: Generate voice
             logger.info("Step 3/6: Generating voice...")

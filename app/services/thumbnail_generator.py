@@ -33,6 +33,7 @@ class ThumbnailGenerator:
         topic: str,
         output_path: Path,
         style: str = "professional",
+        quote: str | None = None,
     ) -> Path:
         """
         Generate a YouTube thumbnail featuring the person.
@@ -42,6 +43,7 @@ class ThumbnailGenerator:
             topic: Video topic/theme
             output_path: Where to save the thumbnail
             style: Thumbnail style (professional, dramatic, modern, etc.)
+            quote: Catchphrase or famous quote to display (optional)
 
         Returns:
             Path to generated thumbnail file
@@ -55,15 +57,15 @@ class ThumbnailGenerator:
 
         if provider == "nanobanana":
             thumbnail_path = await self._generate_with_nanobanana(
-                person_name, topic, output_path, style
+                person_name, topic, output_path, style, quote
             )
         elif provider == "dalle":
             thumbnail_path = await self._generate_with_dalle(
-                person_name, topic, output_path, style
+                person_name, topic, output_path, style, quote
             )
         elif provider == "stable-diffusion":
             thumbnail_path = await self._generate_with_stable_diffusion(
-                person_name, topic, output_path, style
+                person_name, topic, output_path, style, quote
             )
         else:
             raise ValueError(f"Unsupported thumbnail provider: {provider}")
@@ -72,14 +74,14 @@ class ThumbnailGenerator:
         return thumbnail_path
 
     async def _generate_with_nanobanana(
-        self, person_name: str, topic: str, output_path: Path, style: str
+        self, person_name: str, topic: str, output_path: Path, style: str, quote: str | None = None
     ) -> Path:
         """Generate thumbnail using Nanobanana Pro API."""
         if not self.nanobanana_api_key:
             logger.warning(
                 "Nanobanana API key not configured, falling back to DALL-E"
             )
-            return await self._generate_with_dalle(person_name, topic, output_path, style)
+            return await self._generate_with_dalle(person_name, topic, output_path, style, quote)
 
         try:
             # Nanobanana Pro用のプロンプト作成
@@ -126,17 +128,17 @@ class ThumbnailGenerator:
                 f.write(img_response.content)
 
             # テキストオーバーレイを追加（必要に応じて）
-            self._add_text_overlay(output_path, person_name, topic)
+            self._add_text_overlay(output_path, person_name, topic, quote)
 
             return output_path
 
         except Exception as e:
             logger.error(f"Nanobanana generation failed: {e}")
             logger.info("Falling back to DALL-E")
-            return await self._generate_with_dalle(person_name, topic, output_path, style)
+            return await self._generate_with_dalle(person_name, topic, output_path, style, quote)
 
     async def _generate_with_dalle(
-        self, person_name: str, topic: str, output_path: Path, style: str
+        self, person_name: str, topic: str, output_path: Path, style: str, quote: str | None = None
     ) -> Path:
         """Generate thumbnail using DALL-E 3."""
         if not self.openai_client:
@@ -171,7 +173,7 @@ class ThumbnailGenerator:
             img.save(output_path, quality=95)
 
             # テキストオーバーレイを追加
-            self._add_text_overlay(output_path, person_name, topic)
+            self._add_text_overlay(output_path, person_name, topic, quote)
 
             return output_path
 
@@ -180,13 +182,13 @@ class ThumbnailGenerator:
             raise RuntimeError(f"Failed to generate thumbnail: {e}") from e
 
     async def _generate_with_stable_diffusion(
-        self, person_name: str, topic: str, output_path: Path, style: str
+        self, person_name: str, topic: str, output_path: Path, style: str, quote: str | None = None
     ) -> Path:
         """Generate thumbnail using Stable Diffusion API."""
         # Stable Diffusion API実装（Replicate等を使用）
         # 実装は後で追加可能
         logger.warning("Stable Diffusion not yet implemented, using DALL-E")
-        return await self._generate_with_dalle(person_name, topic, output_path, style)
+        return await self._generate_with_dalle(person_name, topic, output_path, style, quote)
 
     def _create_thumbnail_prompt(
         self, person_name: str, topic: str, style: str
@@ -217,58 +219,81 @@ class ThumbnailGenerator:
         return prompt
 
     def _add_text_overlay(
-        self, image_path: Path, person_name: str, topic: str
+        self, image_path: Path, person_name: str, topic: str, quote: str | None = None
     ) -> None:
-        """Add text overlay to thumbnail (参考画像スタイル: 左側に肩書と名前)."""
+        """Add text overlay to thumbnail (新デザイン: 名言を上部、名前・肩書を下部)."""
         try:
             img = Image.open(image_path)
             draw = ImageDraw.Draw(img)
 
             # フォントの設定（日本語対応）
             import platform
-            title_font = None
-            subtitle_font = None
-            topic_font = None
+
+            # ゴシック体（名前用）と明朝体（名言・肩書用）を分けて設定
+            gothic_font = None  # 名前用（ゴシック、太字）
+            mincho_font = None  # 名言用（明朝、大きめ）
+            subtitle_mincho_font = None  # 肩書用（明朝、小さめ）
 
             if platform.system() == "Windows":
-                # Windows: 日本語フォントを試す
-                font_paths = [
-                    "C:/Windows/Fonts/meiryo.ttc",  # メイリオ
+                # Windows: ゴシック体（太字）を探す
+                gothic_paths = [
+                    "C:/Windows/Fonts/YuGothB.ttc",  # 游ゴシック Bold
+                    "C:/Windows/Fonts/meiryob.ttc",  # メイリオ Bold
                     "C:/Windows/Fonts/msgothic.ttc",  # MSゴシック
-                    "C:/Windows/Fonts/msmincho.ttc",  # MS明朝
-                    "C:/Windows/Fonts/yu Gothic.ttc",  # 游ゴシック
                 ]
-                for font_path in font_paths:
+                for font_path in gothic_paths:
                     try:
-                        title_font = ImageFont.truetype(font_path, 48)
-                        subtitle_font = ImageFont.truetype(font_path, 32)
-                        topic_font = ImageFont.truetype(font_path, 36)
-                        logger.debug(f"日本語フォントを使用: {font_path}")
+                        gothic_font = ImageFont.truetype(font_path, 80)  # 名前用、大きく
+                        logger.debug(f"ゴシック体フォント: {font_path}")
                         break
                     except (OSError, IOError):
                         continue
-            elif platform.system() == "Darwin":  # macOS
-                font_paths = [
-                    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-                    "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
-                    "/System/Library/Fonts/AppleGothic.ttf",
+
+                # Windows: 明朝体を探す
+                mincho_paths = [
+                    "C:/Windows/Fonts/YuMincho.ttc",  # 游明朝
+                    "C:/Windows/Fonts/msmincho.ttc",  # MS明朝
                 ]
-                for font_path in font_paths:
+                for font_path in mincho_paths:
                     try:
-                        title_font = ImageFont.truetype(font_path, 48)
-                        subtitle_font = ImageFont.truetype(font_path, 32)
-                        topic_font = ImageFont.truetype(font_path, 36)
-                        logger.debug(f"日本語フォントを使用: {font_path}")
+                        mincho_font = ImageFont.truetype(font_path, 100)  # 名言用、最大
+                        subtitle_mincho_font = ImageFont.truetype(font_path, 45)  # 肩書用
+                        logger.debug(f"明朝体フォント: {font_path}")
+                        break
+                    except (OSError, IOError):
+                        continue
+
+            elif platform.system() == "Darwin":  # macOS
+                gothic_paths = [
+                    "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",  # ヒラギノ角ゴ Bold
+                    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+                ]
+                for font_path in gothic_paths:
+                    try:
+                        gothic_font = ImageFont.truetype(font_path, 80)
+                        logger.debug(f"ゴシック体フォント: {font_path}")
+                        break
+                    except (OSError, IOError):
+                        continue
+
+                mincho_paths = [
+                    "/System/Library/Fonts/ヒラギノ明朝 ProN.ttc",
+                ]
+                for font_path in mincho_paths:
+                    try:
+                        mincho_font = ImageFont.truetype(font_path, 100)
+                        subtitle_mincho_font = ImageFont.truetype(font_path, 45)
+                        logger.debug(f"明朝体フォント: {font_path}")
                         break
                     except (OSError, IOError):
                         continue
 
             # フォントが見つからない場合はデフォルトを使用
-            if title_font is None or subtitle_font is None or topic_font is None:
+            if gothic_font is None or mincho_font is None:
                 logger.warning("日本語フォントが見つかりません。デフォルトフォントを使用します。")
-                title_font = ImageFont.load_default()
-                subtitle_font = ImageFont.load_default()
-                topic_font = ImageFont.load_default()
+                gothic_font = ImageFont.load_default()
+                mincho_font = ImageFont.load_default()
+                subtitle_mincho_font = ImageFont.load_default()
 
             # テキストの位置と色
             width, height = img.size
@@ -278,51 +303,82 @@ class ThumbnailGenerator:
             # 肩書を取得
             person_title = get_person_title(person_name)
             if not person_title:
-                person_title = person_name  # フォールバック
+                person_title = "偉人"  # デフォルト
 
-            # 左側に肩書と名前を配置（参考画像スタイル）
-            left_margin = 50
-            title_y = height // 2 - 60  # 中央より少し上
+            # 【上部】名言を配置（明朝体、太字、大きく）
+            # quoteが渡されていれば使用、なければtopicを使用
+            catchphrase = quote if quote else topic
 
-            # 肩書を上に（小さいフォント）
+            # 名言を適切な長さに調整（2行まで）
+            if len(catchphrase) > 30:
+                # 30文字で折り返し
+                quote_line1 = catchphrase[:30]
+                quote_line2 = catchphrase[30:60]
+            else:
+                quote_line1 = catchphrase
+                quote_line2 = ""
+
+            left_margin = 60
+            quote_y_start = 120  # 上部から
+
+            # 名言1行目
             self._draw_text_with_outline(
                 draw,
-                person_title,
+                quote_line1,
                 left_margin,
-                title_y,
-                subtitle_font,
+                quote_y_start,
+                mincho_font,
                 text_color,
                 outline_color,
-                anchor="lm",  # left-middle
+                outline_width=4,
+                anchor="lt",  # left-top
             )
 
-            # 人物名を下に（大きいフォント）
-            name_y = title_y + 50
+            # 名言2行目（あれば）
+            if quote_line2:
+                self._draw_text_with_outline(
+                    draw,
+                    quote_line2,
+                    left_margin,
+                    quote_y_start + 120,
+                    mincho_font,
+                    text_color,
+                    outline_color,
+                    outline_width=4,
+                    anchor="lt",
+                )
+
+            # 【下部】名前と肩書を配置
+            bottom_margin = height - 180  # 下から
+
+            # 名前（ゴシック体、太字、大きく）
             self._draw_text_with_outline(
                 draw,
                 person_name,
                 left_margin,
-                name_y,
-                title_font,
+                bottom_margin,
+                gothic_font,
                 text_color,
                 outline_color,
-                anchor="lm",  # left-middle
+                outline_width=4,
+                anchor="lt",
             )
 
-            # トピックを下部中央に（オプション）
-            short_topic = topic[:40] + "..." if len(topic) > 40 else topic
-            topic_y = height - 80
+            # 肩書（明朝体、小さめ、名前の下）
             self._draw_text_with_outline(
                 draw,
-                short_topic,
-                width // 2,
-                topic_y,
-                topic_font,
+                person_title,
+                left_margin,
+                bottom_margin + 100,
+                subtitle_mincho_font,
                 text_color,
                 outline_color,
+                outline_width=3,
+                anchor="lt",
             )
 
             img.save(image_path, quality=95)
+            logger.info(f"サムネイルにテキストオーバーレイを追加: 名言「{quote_line1}」、名前「{person_name}」、肩書「{person_title}」")
 
         except Exception as e:
             logger.warning(f"Failed to add text overlay: {e}")

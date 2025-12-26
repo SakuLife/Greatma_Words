@@ -119,7 +119,15 @@ class ThumbnailGenerator:
 
             logger.info(f"KIE AI createTask response: {result}")
 
-            task_id = result.get("id") or result.get("task_id") or result.get("taskId") or result.get("data", {}).get("id")
+            # KIE AI response format: {"code": 200, "data": {"taskId": "..."}}
+            task_id = (
+                result.get("data", {}).get("taskId")
+                or result.get("data", {}).get("task_id")
+                or result.get("data", {}).get("id")
+                or result.get("id")
+                or result.get("task_id")
+                or result.get("taskId")
+            )
             if not task_id:
                 raise ValueError(f"No task ID in response: {result}")
 

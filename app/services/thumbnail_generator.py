@@ -141,7 +141,7 @@ class ThumbnailGenerator:
                 time.sleep(5)  # 5秒待機
 
                 status_response = requests.get(
-                    f"{self.nanobanana_api_url}/jobs/{task_id}",
+                    f"{self.nanobanana_api_url}/jobs/recordInfo?taskId={task_id}",
                     headers=headers,
                     timeout=30,
                 )

@@ -314,10 +314,10 @@ async def main():
             person_name=person_name,
             topic=topic,
             duration_minutes=duration,
-            upload_to_youtube=True,
-            upload_to_drive=True,
-            log_to_sheets=True,
-            send_discord_notifications=True,
+            upload_to_youtube=False,  # GitHub Actions: 認証不要で動画生成のみ
+            upload_to_drive=False,  # GitHub Actions: Drive認証なし
+            log_to_sheets=False,  # GitHub Actions: Sheets認証なし
+            send_discord_notifications=False,  # GitHub Actions: 通知なし
             youtube_privacy="private",
         )
 

@@ -43,11 +43,14 @@ class YouTubeUploader:
         logger.info("Authenticating with YouTube API")
 
         try:
-            # Load credentials from token file if it exists
-            if os.path.exists(token_file):
+            # Load credentials from token file if it exists and is not empty
+            if os.path.exists(token_file) and os.path.getsize(token_file) > 0:
+                logger.debug(f"Loading credentials from {token_file}")
                 self.credentials = Credentials.from_authorized_user_file(
                     token_file, self.scopes
                 )
+            elif os.path.exists(token_file):
+                logger.warning(f"Token file {token_file} exists but is empty, skipping")
 
             # If credentials don't exist or are invalid, get new ones
             if not self.credentials or not self.credentials.valid:

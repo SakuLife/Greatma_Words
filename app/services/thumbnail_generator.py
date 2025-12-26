@@ -23,6 +23,7 @@ class ThumbnailGenerator:
         self.openai_client = None
         self.nanobanana_api_key = settings.nanobanana_api_key
         self.nanobanana_api_url = settings.nanobanana_api_url
+        self.kieai_model = settings.kieai_model  # google/nano-banana (文字なし)
 
         if settings.openai_api_key:
             self.openai_client = OpenAI(api_key=settings.openai_api_key)
@@ -97,8 +98,9 @@ class ThumbnailGenerator:
             }
 
             # KIE AI API仕様に合わせたペイロード
+            # google/nano-banana: 文字なし、背景黒（後でPythonで文字追加）
             payload = {
-                "model": "nano-banana-pro",
+                "model": self.kieai_model,  # google/nano-banana (文字なし)
                 "input": {
                     "prompt": prompt,
                     "aspect_ratio": "16:9",  # YouTubeサムネイル

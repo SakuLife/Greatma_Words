@@ -318,7 +318,7 @@ async def main():
             upload_to_drive=True,
             log_to_sheets=True,
             send_discord_notifications=True,
-            youtube_privacy="private",
+            youtube_privacy="public",  # 公開設定
         )
 
     else:

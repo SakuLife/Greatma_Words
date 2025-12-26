@@ -384,7 +384,7 @@ class VideoCreator:
         # フォントを読み込む
         import platform
         import os
-        font_size = 52  # フォントサイズを少し大きく
+        font_size = 90  # フォントサイズを大きく（視認性向上）
         font = None
 
         if platform.system() == "Windows":
@@ -422,24 +422,27 @@ class VideoCreator:
                         continue
         else:  # Linux (GitHub Actions ubuntu-latest)
             font_candidates = [
-                "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-                "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
-                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                ("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 0),  # Japanese (index 0)
+                ("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc", 0),
+                ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),
+                ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", 0),
             ]
-            for fp in font_candidates:
+            for fp, index in font_candidates:
                 if os.path.exists(fp):
                     try:
-                        font = ImageFont.truetype(fp, font_size)
-                        logger.debug(f"字幕用フォント: {fp} (サイズ: {font_size})")
+                        font = ImageFont.truetype(fp, font_size, index=index)
+                        logger.info(f"字幕用フォント: {fp} (index={index}, サイズ: {font_size})")
                         break
                     except (OSError, IOError) as e:
                         logger.debug(f"フォント読み込み失敗: {fp} - {e}")
                         continue
 
         if font is None:
+            logger.error("⚠️ 字幕用日本語フォントが見つかりません！デフォルトフォントを使用します。")
+            logger.error(f"⚠️ Platform: {platform.system()}, 文字化けが発生する可能性があります。")
             font = ImageFont.load_default()
-            logger.warning("字幕用日本語フォントが見つかりません。デフォルトフォントを使用します。")
+        else:
+            logger.info(f"✅ 字幕フォント読み込み成功 (サイズ: {font_size})")
 
         # テキストを折り返し（助詞・句読点で賢く改行）
         max_chars_per_line = 30

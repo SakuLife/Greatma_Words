@@ -21,12 +21,13 @@ class DescriptionGenerator:
         person_name: str,
         topic: str,
         video_duration_seconds: float,
+        subtitles: list[dict] | None = None,
     ) -> str:
         logger.info("Generating video description")
 
         opening_hook = self._extract_opening_hook(script)
         summary = self._generate_summary(person_name, topic, script, video_duration_seconds)
-        chapters = self._generate_chapters(script, video_duration_seconds)
+        chapters = self._generate_chapters(script, video_duration_seconds, subtitles)
         narration_info = "■ナレーション\nVOICEVOX：青山龍星"
         hashtags = self._generate_hashtags(person_name, topic)
 
@@ -64,11 +65,41 @@ class DescriptionGenerator:
             f"{person_name}の哲学や行動から、現代に応用できる実践的な示唆をまとめた約{minutes}分の動画です。"
         )
 
-    def _generate_chapters(self, script: VideoScript, video_duration_seconds: float) -> str:
-        """Scale chapter timestamps to the actual video length."""
+    def _generate_chapters(
+        self,
+        script: VideoScript,
+        video_duration_seconds: float,
+        subtitles: list[dict] | None = None,
+    ) -> str:
+        """Generate chapter timestamps using actual subtitle timings."""
         if not script.sections:
             return "00:00 導入"
 
+        # subtitles から実際のセクション開始時刻を計算
+        if subtitles:
+            chapters: list[str] = []
+            subtitle_index = 0
+
+            for idx, section in enumerate(script.sections, start=1):
+                # このセクションの最初の字幕を探す
+                section_start_time = 0.0
+                if subtitle_index < len(subtitles):
+                    section_start_time = subtitles[subtitle_index].get("start_time", 0.0)
+
+                minutes = int(section_start_time // 60)
+                seconds = int(section_start_time % 60)
+                title = section.title or f"第{idx}章"
+                chapters.append(f"{minutes:02d}:{seconds:02d} {title}")
+
+                # このセクションの字幕数分インデックスを進める
+                if section.subtitles:
+                    subtitle_index += len(section.subtitles)
+
+            logger.info(f"✅ 実際の字幕タイミングを使用してチャプターを生成しました")
+            return "\n".join(chapters)
+
+        # フォールバック: 推定時間で計算（従来の方法）
+        logger.warning("⚠️ 字幕データがないため、推定時間でチャプターを生成します")
         total_estimated = sum(section.duration_seconds for section in script.sections)
         scale = (
             max(video_duration_seconds, 1.0) / total_estimated

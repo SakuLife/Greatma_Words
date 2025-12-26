@@ -218,10 +218,10 @@ class VideoGenerationOrchestrator:
             if config.upload_to_youtube:
                 logger.info("Step 6/6: Uploading to YouTube...")
 
-                # Prepare metadata
+                # Prepare metadata (subtitles を使って正確なタイムスタンプを生成)
                 video_metadata = VideoMetadata(
                     title=f"{config.person_name}の哲学 - {config.topic}",
-                    description=self._generate_video_description(script, config),
+                    description=self._generate_video_description(script, config, subtitles),
                     tags=[
                         config.person_name,
                         "哲学",
@@ -448,7 +448,7 @@ class VideoGenerationOrchestrator:
 
                 video_metadata = VideoMetadata(
                     title=f"{config.person_name}の教え - {config.topic}",
-                    description=self._generate_video_description(script, config),
+                    description=self._generate_video_description(script, config, subtitles),
                     tags=[
                         config.person_name,
                         "教養",
@@ -506,7 +506,12 @@ class VideoGenerationOrchestrator:
 
         return False
 
-    def _generate_video_description(self, script, config: GenerationConfig) -> str:
+    def _generate_video_description(
+        self,
+        script,
+        config: GenerationConfig,
+        subtitles: list[dict] | None = None,
+    ) -> str:
         """Generate YouTube video description from script."""
         # 音声ファイルから動画の長さを取得
         try:
@@ -517,12 +522,13 @@ class VideoGenerationOrchestrator:
         except Exception:
             video_duration_seconds = script.total_duration_minutes * 60
 
-        # 新しいDescriptionGeneratorを使用して説明文を生成
+        # 新しいDescriptionGeneratorを使用して説明文を生成（実際の字幕タイミングを使用）
         description = self.description_generator.generate_description(
             script=script,
             person_name=config.person_name,
             topic=config.topic,
             video_duration_seconds=video_duration_seconds,
+            subtitles=subtitles,
         )
 
         return description

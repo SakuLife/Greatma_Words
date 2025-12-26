@@ -194,8 +194,8 @@ class ThumbnailGenerator:
 
         except Exception as e:
             logger.error(f"KIE AI generation failed: {e}")
-            logger.info("Falling back to DALL-E")
-            return await self._generate_with_dalle(person_name, topic, output_path, style, quote)
+            # OpenAI APIは使わないので、フォールバックせずエラーを出す
+            raise RuntimeError(f"Thumbnail generation failed with KIE AI: {e}") from e
 
     async def _generate_with_dalle(
         self, person_name: str, topic: str, output_path: Path, style: str, quote: str | None = None
@@ -344,6 +344,40 @@ class ThumbnailGenerator:
                         mincho_font = ImageFont.truetype(font_path, 100)
                         subtitle_mincho_font = ImageFont.truetype(font_path, 45)
                         logger.debug(f"明朝体フォント: {font_path}")
+                        break
+                    except (OSError, IOError):
+                        continue
+
+            else:  # Linux (GitHub Actions ubuntu-latest)
+                # Noto Sans CJK (fonts-noto-cjk package)
+                gothic_paths = [
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                    "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                ]
+                for font_path in gothic_paths:
+                    try:
+                        gothic_font = ImageFont.truetype(font_path, 80)
+                        logger.info(f"Linux ゴシック体フォント: {font_path}")
+                        break
+                    except (OSError, IOError):
+                        continue
+
+                # Noto Serif CJK for mincho style
+                mincho_paths = [
+                    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
+                    "/usr/share/fonts/truetype/noto/NotoSerifCJK-Bold.ttc",
+                    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+                    "/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc",
+                    # フォールバック: ゴシック体を明朝代わりに
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                ]
+                for font_path in mincho_paths:
+                    try:
+                        mincho_font = ImageFont.truetype(font_path, 100)
+                        subtitle_mincho_font = ImageFont.truetype(font_path, 45)
+                        logger.info(f"Linux 明朝体フォント: {font_path}")
                         break
                     except (OSError, IOError):
                         continue

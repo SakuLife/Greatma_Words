@@ -78,8 +78,8 @@ jobs:
           KIEAI_API_KEY=${{ secrets.KIEAI_API_KEY }}
           KIEAI_API_URL=https://api.kie.ai/api/v1
           KIEAI_MODEL=google/nano-banana
-          USE_THUMBNAIL_GENERATION=true
-          SKIP_THUMBNAIL_GENERATION=false
+          USE_THUMBNAIL_GENERATION=false
+          SKIP_THUMBNAIL_GENERATION=true
           THUMBNAIL_PROVIDER=nanobanana
           # Use KIEAI for thumbnail generation (nano-banana model)
           NANOBANANA_API_KEY=${{ secrets.KIEAI_API_KEY }}

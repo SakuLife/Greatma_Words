@@ -148,23 +148,36 @@ class ThumbnailGenerator:
                 status_response.raise_for_status()
                 status_result = status_response.json()
 
-                status = status_result.get("status") or status_result.get("data", {}).get("status")
-                logger.info(f"Task {task_id} status: {status} (attempt {attempt + 1}/{max_attempts})")
+                # KIE AI uses "state" not "status"
+                state = status_result.get("data", {}).get("state")
+                logger.info(f"Task {task_id} state: {state} (attempt {attempt + 1}/{max_attempts})")
                 if attempt == 0:  # 最初の1回だけ全レスポンスをログ
                     logger.info(f"KIE AI status response: {status_result}")
 
-                if status == "completed" or status == "success":
-                    # 画像URLを取得（KIE AIの色々なレスポンスフォーマットに対応）
-                    image_url = (
-                        status_result.get("result", {}).get("url")
-                        or status_result.get("output", {}).get("url")
-                        or status_result.get("data", {}).get("result", {}).get("url")
-                        or status_result.get("data", {}).get("output", {}).get("url")
-                        or status_result.get("image_url")
-                        or status_result.get("url")
-                    )
+                if state == "success":
+                    # KIE AI: resultJsonをパースしてresultUrlsを取得
+                    import json
 
-                    logger.info(f"Extracted image_url: {image_url}")
+                    result_json_str = status_result.get("data", {}).get("resultJson")
+                    if result_json_str:
+                        try:
+                            result_json = json.loads(result_json_str)
+                            result_urls = result_json.get("resultUrls", [])
+                            image_url = result_urls[0] if result_urls else None
+                            logger.info(f"Parsed resultJson, got image_url: {image_url}")
+                        except (json.JSONDecodeError, IndexError, TypeError) as e:
+                            logger.error(f"Failed to parse resultJson: {e}")
+                            image_url = None
+                    else:
+                        # フォールバック: 他のフォーマットも試す
+                        image_url = (
+                            status_result.get("result", {}).get("url")
+                            or status_result.get("output", {}).get("url")
+                            or status_result.get("data", {}).get("result", {}).get("url")
+                            or status_result.get("data", {}).get("output", {}).get("url")
+                            or status_result.get("image_url")
+                            or status_result.get("url")
+                        )
 
                     if not image_url:
                         raise ValueError(f"No image URL in completed task: {status_result}")
@@ -186,8 +199,13 @@ class ThumbnailGenerator:
                     logger.info(f"Thumbnail saved: {output_path}")
                     return output_path
 
-                elif status == "failed" or status == "error":
-                    error_msg = status_result.get("error") or status_result.get("message") or "Unknown error"
+                elif state == "fail" or state == "failed" or state == "error":
+                    error_msg = (
+                        status_result.get("data", {}).get("failMsg")
+                        or status_result.get("error")
+                        or status_result.get("message")
+                        or "Unknown error"
+                    )
                     raise ValueError(f"Task failed: {error_msg}")
 
             raise TimeoutError(f"Task {task_id} did not complete within {max_attempts * 5} seconds")

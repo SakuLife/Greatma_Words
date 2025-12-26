@@ -296,6 +296,26 @@ class VideoCreator:
                 if os.path.exists(fp):
                     font_path = fp
                     break
+        elif platform.system() == "Darwin":  # macOS
+            font_paths = [
+                "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc",
+                "/System/Library/Fonts/ヒラギノ丸ゴ ProN W4.ttc",
+            ]
+            for fp in font_paths:
+                if os.path.exists(fp):
+                    font_path = fp
+                    break
+        else:  # Linux (GitHub Actions ubuntu-latest)
+            font_paths = [
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            ]
+            for fp in font_paths:
+                if os.path.exists(fp):
+                    font_path = fp
+                    break
 
         if font_path:
             logger.debug(f"字幕用日本語フォントを使用: {font_path}")
@@ -375,6 +395,37 @@ class VideoCreator:
                 "C:/Windows/Fonts/msgothic.ttc",  # MSゴシック
                 "C:/Windows/Fonts/meiryo.ttc",  # メイリオ
                 "C:/Windows/Fonts/YuGothM.ttc",  # 游ゴシック Medium
+            ]
+            for fp in font_candidates:
+                if os.path.exists(fp):
+                    try:
+                        font = ImageFont.truetype(fp, font_size)
+                        logger.debug(f"字幕用フォント: {fp} (サイズ: {font_size})")
+                        break
+                    except (OSError, IOError) as e:
+                        logger.debug(f"フォント読み込み失敗: {fp} - {e}")
+                        continue
+        elif platform.system() == "Darwin":  # macOS
+            font_candidates = [
+                "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",  # Bold
+                "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc",
+                "/System/Library/Fonts/ヒラギノ丸ゴ ProN W4.ttc",
+            ]
+            for fp in font_candidates:
+                if os.path.exists(fp):
+                    try:
+                        font = ImageFont.truetype(fp, font_size)
+                        logger.debug(f"字幕用フォント: {fp} (サイズ: {font_size})")
+                        break
+                    except (OSError, IOError) as e:
+                        logger.debug(f"フォント読み込み失敗: {fp} - {e}")
+                        continue
+        else:  # Linux (GitHub Actions ubuntu-latest)
+            font_candidates = [
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
             ]
             for fp in font_candidates:
                 if os.path.exists(fp):

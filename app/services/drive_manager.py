@@ -46,11 +46,14 @@ class DriveManager:
         logger.info("Authenticating with Google Drive API")
 
         try:
-            # Load credentials from token file if it exists
-            if os.path.exists(token_file):
+            # Load credentials from token file if it exists and is not empty
+            if os.path.exists(token_file) and os.path.getsize(token_file) > 0:
+                logger.debug(f"Loading Drive credentials from {token_file}")
                 self.credentials = Credentials.from_authorized_user_file(
                     token_file, self.SCOPES
                 )
+            elif os.path.exists(token_file):
+                logger.warning(f"Drive token file {token_file} exists but is empty, skipping")
 
             # If credentials don't exist or are invalid, get new ones
             if not self.credentials or not self.credentials.valid:
@@ -59,9 +62,17 @@ class DriveManager:
                     and self.credentials.expired
                     and self.credentials.refresh_token
                 ):
-                    logger.info("Refreshing expired credentials")
+                    logger.info("Refreshing expired Drive credentials")
                     self.credentials.refresh(Request())
                 else:
+                    # Check if running in CI environment (no browser available)
+                    is_ci = os.getenv("CI") or os.getenv("GITHUB_ACTIONS")
+                    if is_ci:
+                        raise RuntimeError(
+                            f"Cannot authenticate in CI environment without valid token file. "
+                            f"Please ensure {token_file} is properly configured with a valid refresh token."
+                        )
+
                     if not os.path.exists(settings.google_client_secrets_file):
                         raise FileNotFoundError(
                             f"Client secrets file not found: {settings.google_client_secrets_file}. "
@@ -74,9 +85,9 @@ class DriveManager:
                     )
                     self.credentials = flow.run_local_server(port=0)
 
-                # Save credentials for future use
-                with open(token_file, "w") as token:
-                    token.write(self.credentials.to_json())
+                    # Save credentials for future use
+                    with open(token_file, "w") as token:
+                        token.write(self.credentials.to_json())
 
             # Build Drive service
             self.service = build("drive", "v3", credentials=self.credentials)

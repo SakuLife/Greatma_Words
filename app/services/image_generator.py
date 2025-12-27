@@ -462,9 +462,9 @@ class ImageGenerator:
                 for font_path in font_candidates:
                     if os.path.exists(font_path):
                         try:
-                            title_font = ImageFont.truetype(font_path, 36)  # 肩書: 名言と同じ36px
-                            subtitle_font = ImageFont.truetype(font_path, 60)  # 名前: 60px
-                            quote_font = ImageFont.truetype(font_path, 36)  # 名言: 36px
+                            title_font = ImageFont.truetype(font_path, 80)  # 肩書: 大きく
+                            subtitle_font = ImageFont.truetype(font_path, 120)  # 名前: 最大
+                            quote_font = ImageFont.truetype(font_path, 100)  # 名言: 大きめ
                             logger.info(f"[OK] 日本語フォントを使用: {font_path}")
                             break
                         except (OSError, IOError) as e:
@@ -479,10 +479,28 @@ class ImageGenerator:
                 for font_path in font_candidates:
                     if os.path.exists(font_path):
                         try:
-                            title_font = ImageFont.truetype(font_path, 36)  # 肩書: 名言と同じ36px
-                            subtitle_font = ImageFont.truetype(font_path, 60)  # 名前: 60px
-                            quote_font = ImageFont.truetype(font_path, 36)  # 名言: 36px
+                            title_font = ImageFont.truetype(font_path, 80)  # 肩書: 大きく
+                            subtitle_font = ImageFont.truetype(font_path, 120)  # 名前: 最大
+                            quote_font = ImageFont.truetype(font_path, 100)  # 名言: 大きめ
                             logger.info(f"[OK] 日本語フォントを使用: {font_path}")
+                            break
+                        except (OSError, IOError) as e:
+                            logger.debug(f"フォント読み込み失敗: {font_path} - {e}")
+                            continue
+            else:  # Linux (GitHub Actions ubuntu-latest)
+                font_candidates = [
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                    "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                ]
+                for font_path in font_candidates:
+                    if os.path.exists(font_path):
+                        try:
+                            title_font = ImageFont.truetype(font_path, 80, index=0)  # 肩書: 大きく、日本語指定
+                            subtitle_font = ImageFont.truetype(font_path, 120, index=0)  # 名前: 最大、日本語指定
+                            quote_font = ImageFont.truetype(font_path, 100, index=0)  # 名言: 大きめ、日本語指定
+                            logger.info(f"✅ Linux 日本語フォントを使用: {font_path} (index=0, sizes=80/120/100)")
                             break
                         except (OSError, IOError) as e:
                             logger.debug(f"フォント読み込み失敗: {font_path} - {e}")
@@ -490,11 +508,13 @@ class ImageGenerator:
 
             # フォントが見つからない場合はデフォルトを使用
             if title_font is None or subtitle_font is None:
-                logger.warning("[警告] 日本語フォントが見つかりません。デフォルトフォントを使用します。")
-                logger.warning("  文字化けする可能性があります。")
+                logger.error("⚠️ 日本語フォントが見つかりません！デフォルトフォントを使用します。")
+                logger.error(f"⚠️ Platform: {platform.system()}, 画像の文字が文字化けする可能性があります。")
                 title_font = ImageFont.load_default()
                 subtitle_font = ImageFont.load_default()
                 quote_font = ImageFont.load_default()
+            else:
+                logger.info("✅ 画像用フォント読み込み成功")
 
             # テキストの色（白）
             text_color = (255, 255, 255)  # 白色

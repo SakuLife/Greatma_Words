@@ -148,72 +148,93 @@ async def generate_data_driven_video(
             logger.info(f"YouTube URL: {youtube_url}")
 
             if discord:
-                await discord.notify_youtube_uploaded(
-                    project.youtube_video_id, f"{person_name} - {topic}", youtube_privacy
-                )
+                try:
+                    await discord.notify_youtube_uploaded(
+                        project.youtube_video_id, f"{person_name} - {topic}", youtube_privacy
+                    )
+                except Exception as e:
+                    logger.warning(f"Discord notification failed (YouTube): {e}")
 
         # Step 3: Upload to Google Drive
         drive_url = None
         if upload_to_drive and drive:
-            logger.info("=" * 60)
-            logger.info("Step 3: Google Driveアップロード")
-            logger.info("=" * 60)
+            try:
+                logger.info("=" * 60)
+                logger.info("Step 3: Google Driveアップロード")
+                logger.info("=" * 60)
 
-            if discord:
-                await discord.notify_task_progress(
-                    "バックアップ", 7, 8, "Google Driveにアップロード中..."
+                if discord:
+                    try:
+                        await discord.notify_task_progress(
+                            "バックアップ", 7, 8, "Google Driveにアップロード中..."
+                        )
+                    except Exception as e:
+                        logger.warning(f"Discord notification failed (Drive start): {e}")
+
+                file_info = await drive.upload_file(
+                    video_path,
+                    file_name=f"{person_name}_{topic}.mp4",
                 )
+                drive_url = file_info["url"]
+                file_size_mb = file_info["size"] / (1024 * 1024)
 
-            file_info = await drive.upload_file(
-                video_path,
-                file_name=f"{person_name}_{topic}.mp4",
-            )
-            drive_url = file_info["url"]
-            file_size_mb = file_info["size"] / (1024 * 1024)
+                logger.info(f"Driveアップロード完了: {drive_url}")
 
-            logger.info(f"Driveアップロード完了: {drive_url}")
-
-            if discord:
-                await discord.notify_drive_uploaded(
-                    file_info["name"], drive_url, file_size_mb
-                )
+                if discord:
+                    try:
+                        await discord.notify_drive_uploaded(
+                            file_info["name"], drive_url, file_size_mb
+                        )
+                    except Exception as e:
+                        logger.warning(f"Discord notification failed (Drive complete): {e}")
+            except Exception as e:
+                logger.error(f"Google Drive upload failed: {e}")
+                # Continue even if Drive upload fails
 
         # Step 4: Log to Google Sheets
         if log_to_sheets and sheets:
-            logger.info("=" * 60)
-            logger.info("Step 4: Google Sheetsログ記録")
-            logger.info("=" * 60)
+            try:
+                logger.info("=" * 60)
+                logger.info("Step 4: Google Sheetsログ記録")
+                logger.info("=" * 60)
 
-            if discord:
-                await discord.notify_task_progress(
-                    "記録", 8, 8, "Google Sheetsに記録中..."
+                if discord:
+                    try:
+                        await discord.notify_task_progress(
+                            "記録", 8, 8, "Google Sheetsに記録中..."
+                        )
+                    except Exception as e:
+                        logger.warning(f"Discord notification failed (Sheets start): {e}")
+
+                generation_time = time.time() - start_time
+
+                # Add suggestion data to sheets log
+                notes = f"AI提案: {suggestion.get('suggestion_reason', 'N/A')}"
+                if auto_suggest:
+                    notes += f"\n期待エンゲージメント: {suggestion.get('expected_engagement', 'N/A')}"
+
+                success = await sheets.log_video_production(
+                    person_name=person_name,
+                    theme=topic,
+                    video_duration=video_duration,
+                    generation_time=generation_time,
+                    youtube_url=youtube_url,
+                    drive_url=drive_url,
+                    project_path=str(project.project_dir),
                 )
 
-            generation_time = time.time() - start_time
-
-            # Add suggestion data to sheets log
-            notes = f"AI提案: {suggestion.get('suggestion_reason', 'N/A')}"
-            if auto_suggest:
-                notes += f"\n期待エンゲージメント: {suggestion.get('expected_engagement', 'N/A')}"
-
-            success = await sheets.log_video_production(
-                person_name=person_name,
-                theme=topic,
-                video_duration=video_duration,
-                generation_time=generation_time,
-                youtube_url=youtube_url,
-                drive_url=drive_url,
-                project_path=str(project.project_dir),
-            )
-
-            if success:
-                logger.info("Sheetsログ記録完了")
+                if success:
+                    logger.info("Sheetsログ記録完了")
+            except Exception as e:
+                logger.error(f"Google Sheets logging failed: {e}")
+                # Continue even if Sheets logging fails
 
         # Step 5: Send completion notification
         total_time = time.time() - start_time
 
         if discord:
-            completion_message = f"""
+            try:
+                completion_message = f"""
 📊 **データドリブン動画生成完了**
 
 **人物**: {person_name}
@@ -229,14 +250,16 @@ async def generate_data_driven_video(
 長さ: {video_duration:.1f}秒
 生成時間: {total_time:.1f}秒
 """
-            await discord.notify_video_completed(
-                person_name=person_name,
-                theme=topic,
-                output_path=str(video_path),
-                duration=video_duration,
-                youtube_url=youtube_url,
-                drive_url=drive_url,
-            )
+                await discord.notify_video_completed(
+                    person_name=person_name,
+                    theme=topic,
+                    output_path=str(video_path),
+                    duration=video_duration,
+                    youtube_url=youtube_url,
+                    drive_url=drive_url,
+                )
+            except Exception as e:
+                logger.warning(f"Discord notification failed (completion): {e}")
 
         logger.info("=" * 60)
         logger.info(f"✅ 完了! 合計時間: {total_time:.1f}秒")

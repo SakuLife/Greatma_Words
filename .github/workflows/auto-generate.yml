@@ -69,6 +69,10 @@ jobs:
             printf '%s' "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > google_token.json || echo "Failed to decode google_token, skipping..."
             if [ -f google_token.json ]; then
               echo "google_token.json size: $(wc -c < google_token.json) bytes"
+              # DriveManager と SheetsManager 用にもコピー
+              cp google_token.json drive_token.json
+              cp google_token.json sheets_token.json
+              echo "Copied to drive_token.json and sheets_token.json"
             fi
           fi
 

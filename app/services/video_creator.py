@@ -384,7 +384,7 @@ class VideoCreator:
         # フォントを読み込む
         import platform
         import os
-        font_size = 90  # フォントサイズを大きく（視認性向上）
+        font_size = 52  # 動的字幕のフォントサイズ
         font = None
 
         if platform.system() == "Windows":

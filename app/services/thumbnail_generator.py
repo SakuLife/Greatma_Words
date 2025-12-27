@@ -367,7 +367,7 @@ class ThumbnailGenerator:
                         continue
 
             else:  # Linux (GitHub Actions ubuntu-latest)
-                # Noto Sans CJK (fonts-noto-cjk package)
+                # Noto Sans CJK (fonts-noto-cjk package) - TTCインデックス0で日本語を指定
                 gothic_paths = [
                     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
                     "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
@@ -376,10 +376,11 @@ class ThumbnailGenerator:
                 ]
                 for font_path in gothic_paths:
                     try:
-                        gothic_font = ImageFont.truetype(font_path, 80)
-                        logger.info(f"Linux ゴシック体フォント: {font_path}")
+                        gothic_font = ImageFont.truetype(font_path, 120, index=0)  # 名前用、大きく、日本語指定
+                        logger.info(f"✅ Linux ゴシック体フォント: {font_path} (index=0, size=120)")
                         break
-                    except (OSError, IOError):
+                    except (OSError, IOError) as e:
+                        logger.debug(f"フォント読み込み失敗: {font_path} - {e}")
                         continue
 
                 # Noto Serif CJK for mincho style
@@ -393,19 +394,23 @@ class ThumbnailGenerator:
                 ]
                 for font_path in mincho_paths:
                     try:
-                        mincho_font = ImageFont.truetype(font_path, 100)
-                        subtitle_mincho_font = ImageFont.truetype(font_path, 45)
-                        logger.info(f"Linux 明朝体フォント: {font_path}")
+                        mincho_font = ImageFont.truetype(font_path, 140, index=0)  # 名言用、最大、日本語指定
+                        subtitle_mincho_font = ImageFont.truetype(font_path, 60, index=0)  # 肩書用、日本語指定
+                        logger.info(f"✅ Linux 明朝体フォント: {font_path} (index=0, sizes=140/60)")
                         break
-                    except (OSError, IOError):
+                    except (OSError, IOError) as e:
+                        logger.debug(f"フォント読み込み失敗: {font_path} - {e}")
                         continue
 
             # フォントが見つからない場合はデフォルトを使用
             if gothic_font is None or mincho_font is None:
-                logger.warning("日本語フォントが見つかりません。デフォルトフォントを使用します。")
+                logger.error("⚠️ 日本語フォントが見つかりません！デフォルトフォントを使用します。")
+                logger.error(f"⚠️ Platform: {platform.system()}, 画像の文字が文字化けする可能性があります。")
                 gothic_font = ImageFont.load_default()
                 mincho_font = ImageFont.load_default()
                 subtitle_mincho_font = ImageFont.load_default()
+            else:
+                logger.info("✅ 画像用フォント読み込み成功")
 
             # テキストの位置と色
             width, height = img.size

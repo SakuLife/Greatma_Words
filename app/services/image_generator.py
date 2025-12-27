@@ -524,6 +524,8 @@ class ImageGenerator:
             person_title = get_person_title(person_name)
             person_quote = get_person_quote(person_name)
 
+            logger.info(f"テキストオーバーレイ: 人物='{person_name}', 肩書='{person_title}', 名言='{person_quote}'")
+
             if not person_title:
                 person_title = ""  # 肩書がない場合は表示しない
             if not person_quote:
@@ -531,7 +533,7 @@ class ImageGenerator:
 
             # 左側に肩書、名前、名言を配置（縦に並べる）
             left_margin = 80
-            start_y = height // 3  # 上部1/3の位置から開始
+            start_y = height // 4  # 上部1/4の位置から開始（少し上に）
 
             current_y = start_y
 
@@ -548,7 +550,7 @@ class ImageGenerator:
                     outline_width=4,  # アウトライン太く
                     anchor="lt",  # left-top
                 )
-                current_y += 81  # フォントサイズ31px + 行間50px = 81px
+                current_y += 61  # フォントサイズ31px + 行間30px = 61px
 
             # 人物名を中央に（大きいフォント）
             self._draw_text_with_outline(
@@ -562,7 +564,7 @@ class ImageGenerator:
                 outline_width=5,  # アウトライン太く
                 anchor="lt",  # left-top
             )
-            current_y += 146  # フォントサイズ96px + 行間50px = 146px
+            current_y += 126  # フォントサイズ96px + 行間30px = 126px
 
             # 名言を下に（引用符付き、中サイズフォント）
             if person_quote:

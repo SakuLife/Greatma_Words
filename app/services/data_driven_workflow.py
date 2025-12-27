@@ -3,9 +3,11 @@ Data-driven video generation workflow.
 Uses YouTube analytics to inform content creation decisions.
 """
 
+from app.config import settings
 from app.services.content_analyzer import ContentAnalyzer
 from app.services.person_info_fetcher import PersonInfoFetcher
 from app.services.script_generator import ScriptGenerator
+from app.services.sheets_manager import SheetsManager
 from app.utils.logger import logger
 
 
@@ -17,6 +19,7 @@ class DataDrivenWorkflow:
         self.content_analyzer = ContentAnalyzer()
         self.person_fetcher = PersonInfoFetcher()
         self.script_generator = ScriptGenerator()
+        self.sheets_manager = SheetsManager() if settings.google_sheets_id else None
 
     async def suggest_next_video(
         self, exclude_persons: list[str] | None = None
@@ -31,6 +34,12 @@ class DataDrivenWorkflow:
             Dictionary with video suggestion
         """
         logger.info("Starting data-driven video suggestion...")
+
+        # Get recently featured persons from Google Sheets
+        if self.sheets_manager and not exclude_persons:
+            exclude_persons = await self._get_recently_featured_persons()
+            if exclude_persons:
+                logger.info(f"Excluding recently featured persons: {', '.join(exclude_persons)}")
 
         # Step 1: Analyze channel performance
         logger.info("Step 1: Analyzing channel performance...")
@@ -158,3 +167,68 @@ class DataDrivenWorkflow:
 
         logger.info("Data-driven script generation complete")
         return suggestion, script
+
+    async def _get_recently_featured_persons(
+        self, lookback_count: int = 10
+    ) -> list[str]:
+        """
+        Get list of recently featured persons from Google Sheets.
+
+        Args:
+            lookback_count: Number of recent videos to check
+
+        Returns:
+            List of person names to exclude
+        """
+        if not self.sheets_manager:
+            return []
+
+        try:
+            logger.info(f"Fetching last {lookback_count} videos from Google Sheets...")
+
+            # Authenticate if needed
+            if not self.sheets_manager.service:
+                await self.sheets_manager.authenticate()
+
+            # Get video stats to find person names
+            stats = await self.sheets_manager.get_video_stats()
+
+            if not stats or stats.get("total_videos", 0) == 0:
+                logger.info("No video history found in Sheets")
+                return []
+
+            # Read recent video logs
+            range_name = "動画制作ログ!A:K"
+            result = (
+                self.sheets_manager.service.spreadsheets()
+                .values()
+                .get(
+                    spreadsheetId=self.sheets_manager.spreadsheet_id,
+                    range=range_name,
+                )
+                .execute()
+            )
+
+            values = result.get("values", [])
+
+            if len(values) <= 1:  # Only header or empty
+                logger.info("No video data found in Sheets")
+                return []
+
+            # Extract person names from recent videos (column B = index 1)
+            # Skip header row, get last N videos
+            recent_videos = values[-lookback_count:] if len(values) > lookback_count else values[1:]
+
+            person_names = []
+            for row in recent_videos:
+                if len(row) > 1 and row[1]:  # Check if person name exists
+                    person_name = row[1].strip()
+                    if person_name and person_name not in person_names:
+                        person_names.append(person_name)
+
+            logger.info(f"Found {len(person_names)} recently featured persons")
+            return person_names
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch recent persons from Sheets: {e}")
+            return []

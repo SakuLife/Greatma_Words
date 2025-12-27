@@ -462,9 +462,9 @@ class ImageGenerator:
                 for font_path in font_candidates:
                     if os.path.exists(font_path):
                         try:
-                            title_font = ImageFont.truetype(font_path, 24)  # 肩書: 小さく
+                            title_font = ImageFont.truetype(font_path, 31)  # 肩書: 1.3倍
                             subtitle_font = ImageFont.truetype(font_path, 96)  # 名前: 80%
-                            quote_font = ImageFont.truetype(font_path, 24)  # 名言: 小さく
+                            quote_font = ImageFont.truetype(font_path, 31)  # 名言: 1.3倍
                             logger.info(f"[OK] 日本語フォントを使用: {font_path}")
                             break
                         except (OSError, IOError) as e:
@@ -479,9 +479,9 @@ class ImageGenerator:
                 for font_path in font_candidates:
                     if os.path.exists(font_path):
                         try:
-                            title_font = ImageFont.truetype(font_path, 24)  # 肩書: 小さく
+                            title_font = ImageFont.truetype(font_path, 31)  # 肩書: 1.3倍
                             subtitle_font = ImageFont.truetype(font_path, 96)  # 名前: 80%
-                            quote_font = ImageFont.truetype(font_path, 24)  # 名言: 小さく
+                            quote_font = ImageFont.truetype(font_path, 31)  # 名言: 1.3倍
                             logger.info(f"[OK] 日本語フォントを使用: {font_path}")
                             break
                         except (OSError, IOError) as e:
@@ -497,10 +497,10 @@ class ImageGenerator:
                 for font_path in font_candidates:
                     if os.path.exists(font_path):
                         try:
-                            title_font = ImageFont.truetype(font_path, 24, index=0)  # 肩書: 小さく、日本語指定
+                            title_font = ImageFont.truetype(font_path, 31, index=0)  # 肩書: 1.3倍、日本語指定
                             subtitle_font = ImageFont.truetype(font_path, 96, index=0)  # 名前: 80%、日本語指定
-                            quote_font = ImageFont.truetype(font_path, 24, index=0)  # 名言: 小さく、日本語指定
-                            logger.info(f"✅ Linux 日本語フォントを使用: {font_path} (index=0, sizes=24/96/24)")
+                            quote_font = ImageFont.truetype(font_path, 31, index=0)  # 名言: 1.3倍、日本語指定
+                            logger.info(f"✅ Linux 日本語フォントを使用: {font_path} (index=0, sizes=31/96/31)")
                             break
                         except (OSError, IOError) as e:
                             logger.debug(f"フォント読み込み失敗: {font_path} - {e}")
@@ -548,7 +548,7 @@ class ImageGenerator:
                     outline_width=4,  # アウトライン太く
                     anchor="lt",  # left-top
                 )
-                current_y += 56  # フォントサイズ36px + 行間20px = 56px
+                current_y += 81  # フォントサイズ31px + 行間50px = 81px
 
             # 人物名を中央に（大きいフォント）
             self._draw_text_with_outline(
@@ -562,7 +562,7 @@ class ImageGenerator:
                 outline_width=5,  # アウトライン太く
                 anchor="lt",  # left-top
             )
-            current_y += 80  # フォントサイズ60px + 行間20px = 80px
+            current_y += 146  # フォントサイズ96px + 行間50px = 146px
 
             # 名言を下に（引用符付き、中サイズフォント）
             if person_quote:

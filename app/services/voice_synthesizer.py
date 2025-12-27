@@ -108,6 +108,9 @@ class VoiceSynthesizer:
                     if temp_path.exists():
                         temp_path.unlink()
 
+            # Increase volume by 1.2x (about 1.58 dB)
+            combined_audio_segment = combined_audio_segment.apply_gain(1.58)
+
             # Export combined audio
             output_path.parent.mkdir(parents=True, exist_ok=True)
             combined_audio_segment.export(str(output_path), format="wav")
@@ -150,6 +153,9 @@ class VoiceSynthesizer:
                 finally:
                     if temp_path.exists():
                         temp_path.unlink()
+
+            # Increase volume by 1.2x (about 1.58 dB)
+            combined_audio_segment = combined_audio_segment.apply_gain(1.58)
 
             # Export combined audio
             output_path.parent.mkdir(parents=True, exist_ok=True)

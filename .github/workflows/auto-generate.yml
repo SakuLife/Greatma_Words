@@ -1,6 +1,9 @@
 name: Auto Generate Data-Driven Video
 
 on:
+  schedule:
+    # 毎朝10時（JST）に自動実行 = UTC 1:00
+    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       duration_minutes:
@@ -107,7 +110,7 @@ jobs:
           YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
           YOUTUBE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload
           YOUTUBE_DEFAULT_CATEGORY=22
-          YOUTUBE_DEFAULT_PRIVACY=public
+          YOUTUBE_DEFAULT_PRIVACY=private
 
           # Google Drive / Sheets
           GOOGLE_CLIENT_SECRETS_FILE=client_secrets.json

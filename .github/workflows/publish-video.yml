@@ -1,0 +1,67 @@
+name: Publish Latest Private Video
+
+on:
+  schedule:
+    # 毎日18時（JST）に自動実行 = UTC 9:00
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Write client_secrets.json
+        run: |
+          if [ -n "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" ]; then
+            printf '%s' "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" | tr -d '\n\r' | base64 -d > client_secrets.json
+          fi
+
+      - name: Write token.json (YouTube refresh token)
+        run: |
+          if [ -n "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" ]; then
+            printf '%s' "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > token.json
+          fi
+
+      - name: Write Google token (optional, for Sheets logging)
+        continue-on-error: true
+        run: |
+          if [ -n "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" ]; then
+            printf '%s' "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > google_token.json
+            cp google_token.json sheets_token.json
+          fi
+
+      - name: Generate .env
+        run: |
+          cat > .env << 'EOF'
+          APP_ENV=production
+          DEBUG=false
+
+          # YouTube
+          YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
+          YOUTUBE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload
+          YOUTUBE_DEFAULT_CATEGORY=22
+          YOUTUBE_DEFAULT_PRIVACY=public
+
+          # Google Sheets
+          GOOGLE_CLIENT_SECRETS_FILE=client_secrets.json
+          GOOGLE_SHEETS_ID=${{ secrets.GOOGLE_SHEETS_ID }}
+
+          # Discord
+          DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}
+          EOF
+
+      - name: Publish latest private video to public
+        run: |
+          python publish_latest_video.py

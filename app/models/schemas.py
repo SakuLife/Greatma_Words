@@ -74,6 +74,10 @@ class VideoMetadata(BaseModel):
     tags: list[str] = Field(default_factory=list, max_items=500, description="Video tags")
     category_id: int = Field(default=22, description="YouTube category ID")
     privacy_status: str = Field(default="private", description="Privacy: public/private/unlisted")
+    publish_at: Optional[datetime] = Field(
+        default=None,
+        description="Scheduled publish time (ISO 8601 format). Must be in the future and privacy must be public/unlisted."
+    )
 
 
 class Project(BaseModel):

@@ -127,7 +127,24 @@ class YouTubeUploader:
                 },
             }
 
-            if not notify_subscribers:
+            # Handle scheduled publishing
+            if metadata.publish_at:
+                # Convert datetime to ISO 8601 format (YouTube requires this)
+                publish_at_iso = metadata.publish_at.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                body["status"]["publishAt"] = publish_at_iso
+
+                # For scheduled publishing, privacy must be public or unlisted
+                if metadata.privacy_status == "private":
+                    logger.warning(
+                        "Scheduled publishing requires privacy to be 'public' or 'unlisted'. "
+                        "Changing from 'private' to 'public'."
+                    )
+                    body["status"]["privacyStatus"] = "public"
+
+                logger.info(f"Scheduled publish time: {publish_at_iso}")
+
+            if not notify_subscribers and not metadata.publish_at:
+                # Only set publishAt to None if we're not using scheduled publishing
                 body["status"]["publishAt"] = None
 
             # Prepare media file

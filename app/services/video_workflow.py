@@ -4,6 +4,7 @@ Coordinates all services: script, images, voice, video, YouTube, Drive, Sheets, 
 """
 
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,51 @@ from app.services.voice_synthesizer import VoiceSynthesizer
 from app.services.youtube_uploader import YouTubeUploader
 from app.utils.file_manager import FileManager
 from app.utils.logger import logger
+
+
+def calculate_next_publish_time(target_hour: int = 18) -> datetime:
+    """
+    Calculate next publish time at specified hour in JST (UTC+9).
+
+    Args:
+        target_hour: Target hour in JST (0-23). Default is 18 (6 PM JST).
+
+    Returns:
+        Next publish datetime in UTC (for YouTube API).
+
+    Example:
+        If current time is 2025-12-28 10:00 JST:
+        - Returns 2025-12-28 18:00 JST = 2025-12-28 09:00 UTC (same day)
+
+        If current time is 2025-12-28 19:00 JST:
+        - Returns 2025-12-29 18:00 JST = 2025-12-29 09:00 UTC (next day)
+    """
+    # JST is UTC+9
+    JST = timezone(timedelta(hours=9))
+
+    # Get current time in JST
+    now_jst = datetime.now(JST)
+
+    # Calculate target time today
+    target_time_today = now_jst.replace(
+        hour=target_hour, minute=0, second=0, microsecond=0
+    )
+
+    # If target time has passed, schedule for tomorrow
+    if now_jst >= target_time_today:
+        target_time = target_time_today + timedelta(days=1)
+    else:
+        target_time = target_time_today
+
+    # Convert to UTC for YouTube API (YouTube expects UTC)
+    target_time_utc = target_time.astimezone(timezone.utc)
+
+    logger.info(
+        f"Scheduled publish time: {target_time.strftime('%Y-%m-%d %H:%M:%S %Z')} "
+        f"= {target_time_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+    )
+
+    return target_time_utc
 
 
 class VideoWorkflow:
@@ -199,6 +245,9 @@ class VideoWorkflow:
                         "動画生成", 6, 6, "YouTubeにアップロード中..."
                     )
 
+                # Calculate scheduled publish time (next 18:00 JST)
+                publish_time = calculate_next_publish_time(target_hour=18)
+
                 metadata = VideoMetadata(
                     title=f"{person_name} - {theme}",
                     description=f"{person_name}の{theme}について解説した動画です。\n\n"
@@ -207,6 +256,7 @@ class VideoWorkflow:
                     tags=[person_name, theme, "教養", "ビジネス", "偉人"],
                     category_id=settings.youtube_default_category,
                     privacy_status=privacy_status,
+                    publish_at=publish_time,  # Schedule for next 18:00 JST
                 )
 
                 video_id = await self.youtube_uploader.upload_video(

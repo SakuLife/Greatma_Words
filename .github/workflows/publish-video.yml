@@ -1,10 +1,15 @@
-name: Publish Latest Private Video
+name: Publish Latest Private Video (Legacy - Disabled)
+
+# DEPRECATED: This workflow is no longer needed.
+# Videos are now uploaded with YouTube's native scheduled publishing (publishAt parameter).
+# The auto-generate workflow now schedules videos to publish at 18:00 JST automatically.
 
 on:
-  schedule:
-    # 毎日18時（JST）に自動実行 = UTC 9:00
-    - cron: '0 9 * * *'
-  workflow_dispatch:
+  # Schedule disabled - use YouTube's native scheduled publishing instead
+  # schedule:
+  #   # 毎日18時（JST）に自動実行 = UTC 9:00
+  #   - cron: '0 9 * * *'
+  workflow_dispatch:  # Keep manual trigger for emergency use
 
 jobs:
   publish:

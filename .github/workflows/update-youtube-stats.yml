@@ -1,0 +1,87 @@
+name: Update YouTube Statistics
+
+on:
+  schedule:
+    # Run every 6 hours to keep stats fresh
+    # At 00:00, 06:00, 12:00, 18:00 UTC (09:00, 15:00, 21:00, 03:00 JST)
+    - cron: '0 */6 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  update-stats:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Write client_secrets.json
+        continue-on-error: true
+        run: |
+          if [ -n "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" ]; then
+            printf '%s' "${{ secrets.GOOGLE_CLIENT_SECRETS_JSON_B64 }}" | tr -d '\n\r' | base64 -d > client_secrets.json || echo "Failed to decode client_secrets"
+          fi
+
+      - name: Write YouTube token
+        continue-on-error: true
+        run: |
+          if [ -n "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" ]; then
+            printf '%s' "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > token.json || echo "Failed to decode token.json"
+          fi
+
+      - name: Write Google token (Sheets)
+        continue-on-error: true
+        run: |
+          if [ -n "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" ]; then
+            printf '%s' "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > google_token.json || echo "Failed to decode google_token"
+            cp google_token.json sheets_token.json
+          fi
+
+      - name: Generate .env from secrets
+        run: |
+          cat > .env << 'EOF'
+          APP_ENV=production
+          DEBUG=false
+
+          # AI
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+
+          # YouTube
+          YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
+          YOUTUBE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload
+
+          # Google Sheets
+          GOOGLE_CLIENT_SECRETS_FILE=client_secrets.json
+          GOOGLE_SHEETS_ID=${{ secrets.GOOGLE_SHEETS_ID }}
+
+          # Paths
+          DATA_DIR=./data
+          EOF
+
+      - name: Update YouTube statistics
+        run: |
+          echo "y" | python update_youtube_stats.py
+
+      - name: Report completion
+        if: success()
+        run: |
+          echo "✅ YouTube statistics updated successfully"
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "❌ Failed to update YouTube statistics"

@@ -43,10 +43,19 @@ class DataDrivenWorkflow:
 
         # Step 1: Analyze channel performance
         logger.info("Step 1: Analyzing channel performance...")
-        analysis_text = await self.content_analyzer.get_content_suggestions_for_llm()
-
-        logger.info("Channel analysis complete")
-        logger.debug(f"Analysis:\n{analysis_text[:500]}...")
+        try:
+            analysis_text = await self.content_analyzer.get_content_suggestions_for_llm()
+            logger.info("✅ Channel analysis complete")
+            logger.debug(f"Analysis:\n{analysis_text[:500]}...")
+        except Exception as e:
+            logger.error(f"❌ Failed to analyze channel performance: {e}")
+            logger.error("Cannot suggest next video without performance data.")
+            logger.error("To fix: Run 'python update_youtube_stats.py' to update statistics.")
+            raise RuntimeError(
+                "Channel performance analysis failed. "
+                "Please ensure YouTube statistics are up to date in Google Sheets. "
+                f"Error: {e}"
+            ) from e
 
         # Step 2: Get person suggestion from AI
         logger.info("Step 2: Getting person suggestion from AI...")
@@ -136,8 +145,14 @@ class DataDrivenWorkflow:
         try:
             logger.info("Getting channel analysis for script context...")
             analysis_text = await self.content_analyzer.get_content_suggestions_for_llm()
+            logger.info("✅ Channel analysis retrieved successfully")
+            logger.debug(f"Analysis preview: {analysis_text[:200]}...")
         except Exception as e:
-            logger.warning(f"Failed to get channel analysis, continuing without it: {e}")
+            logger.error(f"❌ Failed to get channel analysis: {e}")
+            logger.error("This means past video performance data is NOT being used for content optimization.")
+            logger.error("To fix: Run 'python update_youtube_stats.py' to update statistics in Google Sheets.")
+            import traceback
+            logger.debug(traceback.format_exc())
             analysis_text = "チャンネル分析データは利用できません。"
 
         # Add analysis context to script generation

@@ -3,6 +3,7 @@ Main orchestrator for GreatMan Words video generation.
 Coordinates all services to generate complete videos.
 """
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.config import settings
@@ -23,6 +24,64 @@ from app.services.description_generator import DescriptionGenerator
 from app.utils.file_manager import FileManager
 from app.utils.logger import logger
 from app.utils.voicevox_launcher import launcher as voicevox_launcher
+import re
+
+
+def remove_stage_directions(text: str) -> str:
+    """
+    Remove stage directions from subtitle text.
+
+    Stage directions are enclosed in brackets like [間], [画面表示], etc.
+
+    Args:
+        text: Text with potential stage directions
+
+    Returns:
+        Text with stage directions removed
+    """
+    # Remove all text within square brackets
+    cleaned_text = re.sub(r'\[.*?\]', '', text)
+    # Remove extra whitespace
+    cleaned_text = ' '.join(cleaned_text.split())
+    return cleaned_text.strip()
+
+
+def calculate_next_publish_time(target_hour: int = 18) -> datetime:
+    """
+    Calculate next publish time at specified hour in JST (UTC+9).
+
+    Args:
+        target_hour: Target hour in JST (0-23). Default is 18 (6 PM JST).
+
+    Returns:
+        Next publish datetime in UTC (for YouTube API).
+    """
+    # JST is UTC+9
+    JST = timezone(timedelta(hours=9))
+
+    # Get current time in JST
+    now_jst = datetime.now(JST)
+
+    # Calculate target time today
+    target_time_today = now_jst.replace(
+        hour=target_hour, minute=0, second=0, microsecond=0
+    )
+
+    # If target time has passed, schedule for tomorrow
+    if now_jst >= target_time_today:
+        target_time = target_time_today + timedelta(days=1)
+    else:
+        target_time = target_time_today
+
+    # Convert to UTC for YouTube API
+    target_time_utc = target_time.astimezone(timezone.utc)
+
+    logger.info(
+        f"Scheduled publish time: {target_time.strftime('%Y-%m-%d %H:%M:%S %Z')} "
+        f"= {target_time_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+    )
+
+    return target_time_utc
 
 
 class VideoGenerationOrchestrator:
@@ -118,16 +177,19 @@ class VideoGenerationOrchestrator:
             audio_path = self.file_manager.get_audio_path(project, "narration.wav")
 
             # 字幕データを準備（字幕ごとに1フレーズずつ音声を生成）
+            # 演出指示（[間]、[画面表示]など）を除去
             subtitles_for_audio = []
             if script:
                 for section in script.sections:
                     if section.subtitles:
                         for subtitle in section.subtitles:
-                            subtitles_for_audio.append({
-                                "text": subtitle.text,
-                                "start_time": subtitle.start_time,
-                                "duration": subtitle.duration,
-                            })
+                            cleaned_text = remove_stage_directions(subtitle.text)
+                            if cleaned_text:  # 空でない場合のみ追加
+                                subtitles_for_audio.append({
+                                    "text": cleaned_text,
+                                    "start_time": subtitle.start_time,
+                                    "duration": subtitle.duration,
+                                })
 
             total_subtitles = len(subtitles_for_audio) if subtitles_for_audio else 0
             if total_subtitles > 0:
@@ -218,6 +280,9 @@ class VideoGenerationOrchestrator:
             if config.upload_to_youtube:
                 logger.info("Step 6/6: Uploading to YouTube...")
 
+                # Calculate scheduled publish time (next 18:00 JST)
+                publish_time = calculate_next_publish_time(target_hour=18)
+
                 # Prepare metadata (subtitles を使って正確なタイムスタンプを生成)
                 video_metadata = VideoMetadata(
                     title=f"{config.person_name}の哲学 - {config.topic}",
@@ -230,6 +295,7 @@ class VideoGenerationOrchestrator:
                         "AI時代",
                     ],
                     privacy_status=config.youtube_privacy,
+                    publish_at=publish_time,  # Schedule for next 18:00 JST
                 )
 
                 video_id = await self.youtube_uploader.upload_video(
@@ -346,16 +412,19 @@ class VideoGenerationOrchestrator:
             audio_path = self.file_manager.get_audio_path(project, "narration.wav")
 
             # 字幕データを準備（字幕ごとに1フレーズずつ音声を生成）
+            # 演出指示（[間]、[画面表示]など）を除去
             subtitles_for_audio = []
             if script:
                 for section in script.sections:
                     if section.subtitles:
                         for subtitle in section.subtitles:
-                            subtitles_for_audio.append({
-                                "text": subtitle.text,
-                                "start_time": subtitle.start_time,
-                                "duration": subtitle.duration,
-                            })
+                            cleaned_text = remove_stage_directions(subtitle.text)
+                            if cleaned_text:  # 空でない場合のみ追加
+                                subtitles_for_audio.append({
+                                    "text": cleaned_text,
+                                    "start_time": subtitle.start_time,
+                                    "duration": subtitle.duration,
+                                })
 
             total_subtitles = len(subtitles_for_audio) if subtitles_for_audio else 0
             if total_subtitles > 0:
@@ -446,6 +515,9 @@ class VideoGenerationOrchestrator:
             if config.upload_to_youtube:
                 logger.info("Step 5/5: Uploading to YouTube...")
 
+                # Calculate scheduled publish time (next 18:00 JST)
+                publish_time = calculate_next_publish_time(target_hour=18)
+
                 video_metadata = VideoMetadata(
                     title=f"{config.person_name}の教え - {config.topic}",
                     description=self._generate_video_description(script, config, subtitles),
@@ -457,6 +529,7 @@ class VideoGenerationOrchestrator:
                         "AI生成",
                     ],
                     privacy_status=config.youtube_privacy,
+                    publish_at=publish_time,  # Schedule for next 18:00 JST
                 )
 
                 video_id = await self.youtube_uploader.upload_video(

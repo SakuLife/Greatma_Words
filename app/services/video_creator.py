@@ -20,6 +20,25 @@ from app.config import settings
 from app.utils.logger import logger
 
 
+def remove_stage_directions(text: str) -> str:
+    """
+    Remove stage directions from subtitle text.
+
+    Stage directions are enclosed in brackets like [間], [画面表示], etc.
+
+    Args:
+        text: Text with potential stage directions
+
+    Returns:
+        Text with stage directions removed
+    """
+    # Remove all text within square brackets
+    cleaned_text = re.sub(r'\[.*?\]', '', text)
+    # Remove extra whitespace
+    cleaned_text = ' '.join(cleaned_text.split())
+    return cleaned_text.strip()
+
+
 class VideoCreator:
     """Creates videos from images and audio."""
 
@@ -326,6 +345,8 @@ class VideoCreator:
 
         for i, subtitle in enumerate(subtitles):
             text = subtitle.get("text", "")
+            # 演出指示（[間]、[画面表示]など）を除去
+            text = remove_stage_directions(text)
             start_time = subtitle.get("start_time", 0.0)
             duration = subtitle.get("duration", 3.0)
 

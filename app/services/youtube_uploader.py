@@ -129,19 +129,57 @@ class YouTubeUploader:
 
             # Handle scheduled publishing
             if metadata.publish_at:
-                # Convert datetime to ISO 8601 format (YouTube requires this)
-                publish_at_iso = metadata.publish_at.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-                body["status"]["publishAt"] = publish_at_iso
+                # Ensure datetime is in UTC and convert to ISO 8601 format with 'Z' suffix
+                # YouTube API requires RFC 3339 format in UTC timezone
+                from datetime import datetime as dt, timezone as dt_timezone
 
-                # For scheduled publishing, privacy must be public or unlisted
-                if metadata.privacy_status == "private":
-                    logger.warning(
-                        "Scheduled publishing requires privacy to be 'public' or 'unlisted'. "
-                        "Changing from 'private' to 'public'."
+                # Convert to UTC if not already
+                if metadata.publish_at.tzinfo is None:
+                    # Assume UTC if no timezone info
+                    publish_at_utc = metadata.publish_at.replace(tzinfo=dt_timezone.utc)
+                else:
+                    publish_at_utc = metadata.publish_at.astimezone(dt_timezone.utc)
+
+                # Remove microseconds for cleaner format
+                publish_at_utc = publish_at_utc.replace(microsecond=0)
+
+                # Validate publish time is in the future
+                now_utc = dt.now(dt_timezone.utc).replace(microsecond=0)
+                time_diff = (publish_at_utc - now_utc).total_seconds()
+
+                if time_diff < 0:
+                    raise ValueError(
+                        f"Scheduled publish time must be in the future. "
+                        f"Requested: {publish_at_utc}, Current: {now_utc}"
                     )
-                    body["status"]["privacyStatus"] = "public"
 
-                logger.info(f"Scheduled publish time: {publish_at_iso}")
+                # YouTube requires at least 15 minutes in the future (some sources say 1 hour)
+                min_seconds = 15 * 60  # 15 minutes
+                if time_diff < min_seconds:
+                    raise ValueError(
+                        f"Scheduled publish time must be at least 15 minutes in the future. "
+                        f"Time difference: {time_diff / 60:.1f} minutes"
+                    )
+
+                # Format as RFC 3339 / ISO 8601 with milliseconds and 'Z' suffix
+                # YouTube API expects: 2026-01-05T09:00:00.000Z
+                publish_at_iso = publish_at_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+                body["status"]["publishAt"] = publish_at_iso
+                logger.info(
+                    f"Scheduled publish time: {publish_at_iso} "
+                    f"({time_diff / 3600:.1f} hours from now)"
+                )
+
+                # For scheduled publishing, privacy MUST be 'private'
+                # YouTube will automatically change it to the final privacy status at publish time
+                if metadata.privacy_status != "private":
+                    logger.warning(
+                        f"Scheduled publishing requires privacy to be 'private'. "
+                        f"Changing from '{metadata.privacy_status}' to 'private'. "
+                        f"Video will be published at the scheduled time."
+                    )
+                    body["status"]["privacyStatus"] = "private"
 
             if not notify_subscribers and not metadata.publish_at:
                 # Only set publishAt to None if we're not using scheduled publishing

@@ -148,9 +148,33 @@ Google Sheetsで全タスクを管理できます：
 ### GitHub
 - [リポジトリ](https://github.com/SakuLife/Greatma_Words.git)
 
+## GitHub Actions 自動化
+
+このプロジェクトは GitHub Actions で完全自動化されています：
+
+### ワークフロー
+- **動画自動生成**: 毎朝10時（JST）に自動で動画を生成・アップロード
+- **YouTube 統計更新**: 6時間ごとに視聴回数・いいね数を自動更新
+- **予約投稿**: 生成した動画を毎日18時（JST）に自動公開
+
+### トークン管理
+認証トークンが期限切れになった場合：
+
+```bash
+# YouTube トークンを再生成
+python generate_youtube_token.py
+
+# Google Sheets トークンを再生成
+python generate_sheets_token.py
+```
+
+詳細は [GitHub Actions トラブルシューティング](docs/github-actions-troubleshooting.md) を参照。
+
 ## ドキュメント
 - [QUICKSTART.md](QUICKSTART.md) - クイックスタートガイド
 - [docs/integration-setup.md](docs/integration-setup.md) - 外部サービス連携設定
+- [docs/youtube-scheduled-publishing.md](docs/youtube-scheduled-publishing.md) - YouTube 予約投稿ガイド
+- [docs/github-actions-troubleshooting.md](docs/github-actions-troubleshooting.md) - GitHub Actions トラブルシューティング
 - [docs/task-management.md](docs/task-management.md) - タスク管理一覧
 - [docs/google-sheets-setup.md](docs/google-sheets-setup.md) - Sheets詳細設定
 - [docs/copyright-guidelines.md](docs/copyright-guidelines.md) - 著作権ガイドライン

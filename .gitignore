@@ -41,9 +41,15 @@ env/
 client_secrets.json
 token.json
 credentials.json
+google_token.json
 # Google API tokens
 drive_token.json
 sheets_token.json
+# Base64 encoded tokens for GitHub Secrets
+*_token_b64.txt
+youtube_token_b64.txt
+sheets_token_b64.txt
+google_token_b64.txt
 # Backup files
 .env.backup
 

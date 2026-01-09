@@ -187,7 +187,68 @@ class DataDrivenWorkflow:
         self, lookback_count: int = 10
     ) -> list[str]:
         """
-        Get list of recently featured persons from Google Sheets.
+        Get list of recently featured persons from YouTube channel.
+
+        Args:
+            lookback_count: Number of recent videos to check
+
+        Returns:
+            List of person names to exclude
+        """
+        try:
+            logger.info(f"Fetching last {lookback_count} videos from YouTube...")
+
+            # Get channel stats with recent videos from YouTube Analytics
+            channel_stats = await self.content_analyzer.youtube_analytics.get_channel_stats()
+
+            if not channel_stats or not channel_stats.videos:
+                logger.info("No video history found on YouTube")
+                return []
+
+            # Get most recent videos (already sorted by date in get_all_videos)
+            recent_videos = channel_stats.videos[:lookback_count]
+
+            # Extract person names from video titles
+            # Expected format: "人物名・テーマ" or "人物名の哲学 - ..."
+            person_names = []
+            for video in recent_videos:
+                title = video.title
+
+                # Method 1: Split by "・" (most common format)
+                if "・" in title:
+                    person_name = title.split("・")[0].strip()
+                # Method 2: Split by "の" (e.g., "ジェフ・ベゾスの哲学")
+                elif "の" in title:
+                    person_name = title.split("の")[0].strip()
+                # Method 3: Use first part before "-" or ":"
+                elif " - " in title:
+                    person_name = title.split(" - ")[0].strip()
+                elif "：" in title:
+                    person_name = title.split("：")[0].strip()
+                else:
+                    # If no delimiter, skip this video
+                    logger.debug(f"Could not extract person name from: {title}")
+                    continue
+
+                if person_name and person_name not in person_names:
+                    person_names.append(person_name)
+                    logger.debug(f"Extracted person: {person_name} from video: {title}")
+
+            logger.info(f"Found {len(person_names)} recently featured persons from YouTube: {', '.join(person_names)}")
+            return person_names
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch recent persons from YouTube: {e}")
+            logger.debug("Attempting fallback to Google Sheets...")
+
+            # Fallback to Google Sheets if YouTube fails
+            return await self._get_recently_featured_persons_from_sheets(lookback_count)
+
+    async def _get_recently_featured_persons_from_sheets(
+        self, lookback_count: int = 10
+    ) -> list[str]:
+        """
+        Fallback method to get recently featured persons from Google Sheets.
 
         Args:
             lookback_count: Number of recent videos to check
@@ -199,7 +260,7 @@ class DataDrivenWorkflow:
             return []
 
         try:
-            logger.info(f"Fetching last {lookback_count} videos from Google Sheets...")
+            logger.info(f"Fetching last {lookback_count} videos from Google Sheets (fallback)...")
 
             # Authenticate if needed
             if not self.sheets_manager.service:
@@ -241,7 +302,7 @@ class DataDrivenWorkflow:
                     if person_name and person_name not in person_names:
                         person_names.append(person_name)
 
-            logger.info(f"Found {len(person_names)} recently featured persons")
+            logger.info(f"Found {len(person_names)} recently featured persons from Sheets")
             return person_names
 
         except Exception as e:

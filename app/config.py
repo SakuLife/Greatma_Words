@@ -84,7 +84,8 @@ class Settings(BaseSettings):
     skip_thumbnail_generation: bool = False  # サムネイル生成をスキップ（手動生成する場合）
     thumbnail_provider: Literal["nanobanana", "dalle", "stable-diffusion"] = "nanobanana"
     nanobanana_api_key: str = ""
-    nanobanana_api_url: str = "https://api.nanobanana.ai/v1"
+    nanobanana_api_url: str = "https://api.kie.ai/api/v1"  # KIEAI APIを使用
+    nanobanana_pro_model: str = "nano-banana-pro"  # サムネイル用高品質モデル
 
     @property
     def video_width(self) -> int:

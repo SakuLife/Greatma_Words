@@ -1,6 +1,12 @@
 """
 Thumbnail generation service using AI APIs.
 Supports Nanobanana Pro, DALL-E, and Stable Diffusion.
+
+YouTubeサムネイル用に最適化:
+- 大きな太字テキストでインパクトを出す
+- 黄色・オレンジなどのアクセントカラー
+- 人物は右側、左側にキャッチコピー
+- 視認性の高いデザイン
 """
 
 import io
@@ -8,7 +14,7 @@ from pathlib import Path
 
 import requests
 from openai import OpenAI
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 from app.config import settings
 from app.utils.logger import logger
@@ -16,14 +22,26 @@ from app.utils.person_titles import get_person_title
 
 
 class ThumbnailGenerator:
-    """Generates YouTube thumbnails featuring person portraits."""
+    """Generates YouTube thumbnails featuring person portraits with eye-catching design."""
+
+    # サムネイル用カラーパレット
+    COLORS = {
+        "yellow": (255, 215, 0),      # ゴールド（メインキャッチ用）
+        "orange": (255, 140, 0),       # オレンジ（アクセント）
+        "white": (255, 255, 255),      # 白（名前用）
+        "black": (0, 0, 0),            # 黒（縁取り）
+        "red": (255, 50, 50),          # 赤（強調用）
+        "shadow": (30, 30, 30),        # 影（グレー）
+    }
 
     def __init__(self):
         """Initialize thumbnail generator."""
         self.openai_client = None
-        self.nanobanana_api_key = settings.nanobanana_api_key
+        # KIEAI APIキーを使用（nanobanana_api_keyが設定されていない場合）
+        self.nanobanana_api_key = settings.nanobanana_api_key or settings.kieai_api_key
         self.nanobanana_api_url = settings.nanobanana_api_url
-        self.kieai_model = settings.kieai_model  # google/nano-banana (文字なし)
+        # nanobanana proモデルを使用（サムネイル用に高品質）
+        self.thumbnail_model = settings.nanobanana_pro_model
 
         if settings.openai_api_key:
             self.openai_client = OpenAI(api_key=settings.openai_api_key)
@@ -35,9 +53,10 @@ class ThumbnailGenerator:
         output_path: Path,
         style: str = "professional",
         quote: str | None = None,
+        thumbnail_copy: dict | None = None,
     ) -> Path:
         """
-        Generate a YouTube thumbnail featuring the person.
+        Generate a YouTube thumbnail featuring the person with text.
 
         Args:
             person_name: Name of the person
@@ -45,6 +64,11 @@ class ThumbnailGenerator:
             output_path: Where to save the thumbnail
             style: Thumbnail style (professional, dramatic, modern, etc.)
             quote: Catchphrase or famous quote to display (optional)
+            thumbnail_copy: AI生成されたキャッチコピー {
+                "main_copy": "メインコピー",
+                "sub_copy": "サブコピー",
+                "keywords": ["キーワード"]
+            }
 
         Returns:
             Path to generated thumbnail file
@@ -58,7 +82,7 @@ class ThumbnailGenerator:
 
         if provider == "nanobanana":
             thumbnail_path = await self._generate_with_nanobanana(
-                person_name, topic, output_path, style, quote
+                person_name, topic, output_path, style, quote, thumbnail_copy
             )
         elif provider == "dalle":
             thumbnail_path = await self._generate_with_dalle(
@@ -75,9 +99,10 @@ class ThumbnailGenerator:
         return thumbnail_path
 
     async def _generate_with_nanobanana(
-        self, person_name: str, topic: str, output_path: Path, style: str, quote: str | None = None
+        self, person_name: str, topic: str, output_path: Path, style: str,
+        quote: str | None = None, thumbnail_copy: dict | None = None
     ) -> Path:
-        """Generate thumbnail using KIE AI API (nano-banana-pro model)."""
+        """Generate thumbnail using KIE AI API (nano-banana-pro model) with text."""
         if not self.nanobanana_api_key:
             logger.warning(
                 "KIE AI API key not configured, falling back to DALL-E"
@@ -87,8 +112,13 @@ class ThumbnailGenerator:
         try:
             import time
 
-            # プロンプト作成
-            prompt = self._create_thumbnail_prompt(person_name, topic, style)
+            # 肩書を取得
+            person_title = get_person_title(person_name) or ""
+
+            # プロンプト作成（文字入り画像生成用）
+            prompt = self._create_thumbnail_prompt_with_text(
+                person_name, person_title, topic, style, thumbnail_copy
+            )
             logger.info(f"KIE AI thumbnail prompt: {prompt}")
 
             # KIE AI API: タスク作成
@@ -98,9 +128,9 @@ class ThumbnailGenerator:
             }
 
             # KIE AI API仕様に合わせたペイロード
-            # google/nano-banana: 文字なし、背景黒（後でPythonで文字追加）
+            # nanobanana pro: 高品質サムネイル用（後でPythonで文字追加）
             payload = {
-                "model": self.kieai_model,  # google/nano-banana (文字なし)
+                "model": self.thumbnail_model,  # google/nano-banana-pro
                 "input": {
                     "prompt": prompt,
                     "aspect_ratio": "16:9",  # YouTubeサムネイル
@@ -108,6 +138,7 @@ class ThumbnailGenerator:
                     "output_format": "png",
                 },
             }
+            logger.info(f"Using thumbnail model: {self.thumbnail_model}")
 
             # タスク作成
             response = requests.post(
@@ -188,13 +219,21 @@ class ThumbnailGenerator:
                     img_response = requests.get(image_url, timeout=30)
                     img_response.raise_for_status()
 
+                    # 画像を開いてYouTubeサムネイルサイズにリサイズ
+                    img = Image.open(io.BytesIO(img_response.content))
+
+                    # RGBAをRGBに変換（JPEG保存用）
+                    if img.mode == "RGBA":
+                        background = Image.new("RGB", img.size, (0, 0, 0))
+                        background.paste(img, mask=img.split()[3])
+                        img = background
+
+                    # 1280x720にリサイズ
+                    img = img.resize((1280, 720), Image.Resampling.LANCZOS)
+
                     # 保存
                     output_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(output_path, "wb") as f:
-                        f.write(img_response.content)
-
-                    # テキストオーバーレイを追加
-                    self._add_text_overlay(output_path, person_name, topic, quote)
+                    img.save(output_path, quality=95)
 
                     logger.info(f"Thumbnail saved: {output_path}")
                     return output_path
@@ -268,260 +307,290 @@ class ThumbnailGenerator:
         logger.warning("Stable Diffusion not yet implemented, using DALL-E")
         return await self._generate_with_dalle(person_name, topic, output_path, style, quote)
 
-    def _create_thumbnail_prompt(
-        self, person_name: str, topic: str, style: str
+    def _create_thumbnail_prompt_with_text(
+        self,
+        person_name: str,
+        person_title: str,
+        topic: str,
+        style: str,
+        thumbnail_copy: dict | None = None,
     ) -> str:
-        """Create a prompt for thumbnail generation (参考画像スタイル: 人物は右側)."""
-        style_descriptions = {
-            "professional": "professional, business-like, clean, modern",
-            "dramatic": "dramatic lighting, cinematic, impactful",
-            "modern": "modern, sleek, contemporary design",
-            "classic": "classic, timeless, elegant",
-        }
+        """
+        Create a prompt for thumbnail generation WITH TEXT.
 
-        style_desc = style_descriptions.get(style, style_descriptions["professional"])
+        nanobanana proに文字入り画像を生成させるプロンプト
+        """
+        # キャッチコピーを取得
+        if thumbnail_copy:
+            main_copy = thumbnail_copy.get("main_copy", "必見")
+            sub_copy = thumbnail_copy.get("sub_copy", "")
+        else:
+            # フォールバック
+            main_copy = "必見"
+            sub_copy = topic[:15] if topic else ""
 
-        # 参考画像スタイル: 人物は右側、左側はテキスト用のスペース
-        prompt = (
-            f"Professional YouTube thumbnail featuring {person_name}. "
-            f"Topic: {topic}. "
-            f"Style: {style_desc}, high quality, eye-catching, "
-            f"portrait of {person_name} prominently displayed on the right side of the frame, "
-            f"dramatic lighting with strong contrast (bright on one side, shadow on the other), "
-            f"dark background on the left side (space for text overlay), "
-            f"clean professional photography style, "
-            f"1280x720 aspect ratio, "
-            f"suitable for educational business content."
-        )
+        # プロンプト構築
+        prompt = f"""YouTube thumbnail design.
+
+TEXT ON IMAGE (MUST INCLUDE):
+- Large bold yellow Japanese text "{main_copy}" on the upper left
+- White Japanese text "{sub_copy}" below the main text
+- White bold text "{person_name}" at the bottom left
+- Small orange text "{person_title}" below the name
+
+LAYOUT:
+- Person portrait on the RIGHT side (50-60% of frame)
+- Text area on the LEFT side with dark background
+- 16:9 aspect ratio
+
+STYLE:
+- Professional YouTube thumbnail style
+- Dramatic lighting on the person
+- Dark/black gradient background on left for text visibility
+- Eye-catching, click-worthy design
+- High contrast between text and background
+
+PERSON: Business leader, confident expression, looking at camera
+
+IMPORTANT: The Japanese text must be clearly readable and prominent."""
 
         return prompt
 
     def _add_text_overlay(
         self, image_path: Path, person_name: str, topic: str, quote: str | None = None
     ) -> None:
-        """Add text overlay to thumbnail (新デザイン: 名言を上部、名前・肩書を下部)."""
+        """
+        Add eye-catching text overlay to thumbnail.
+
+        YouTubeサムネイル最適化デザイン:
+        - 大きな太字テキスト（黄色/オレンジ）でインパクト
+        - 複数行に分けてキャッチーな配置
+        - 太い黒縁取りで視認性向上
+        - 影効果で立体感
+        """
         try:
             img = Image.open(image_path)
+
+            # RGBAをRGBに変換（JPEG保存用）
+            if img.mode == "RGBA":
+                background = Image.new("RGB", img.size, (0, 0, 0))
+                background.paste(img, mask=img.split()[3])
+                img = background
+
+            # YouTubeサムネイル標準サイズにリサイズ
+            thumbnail_width = 1280
+            thumbnail_height = 720
+            img = img.resize((thumbnail_width, thumbnail_height), Image.Resampling.LANCZOS)
+
             draw = ImageDraw.Draw(img)
-
-            # フォントの設定（日本語対応）
-            import platform
-
-            # ゴシック体（名前用）と明朝体（名言・肩書用）を分けて設定
-            gothic_font = None  # 名前用（ゴシック、太字）
-            mincho_font = None  # 名言用（明朝、大きめ）
-            subtitle_mincho_font = None  # 肩書用（明朝、小さめ）
-
-            if platform.system() == "Windows":
-                # Windows: ゴシック体（太字）を探す
-                gothic_paths = [
-                    "C:/Windows/Fonts/YuGothB.ttc",  # 游ゴシック Bold
-                    "C:/Windows/Fonts/meiryob.ttc",  # メイリオ Bold
-                    "C:/Windows/Fonts/msgothic.ttc",  # MSゴシック
-                ]
-                for font_path in gothic_paths:
-                    try:
-                        gothic_font = ImageFont.truetype(font_path, 80)  # 名前用、大きく
-                        logger.debug(f"ゴシック体フォント: {font_path}")
-                        break
-                    except (OSError, IOError):
-                        continue
-
-                # Windows: 明朝体を探す
-                mincho_paths = [
-                    "C:/Windows/Fonts/YuMincho.ttc",  # 游明朝
-                    "C:/Windows/Fonts/msmincho.ttc",  # MS明朝
-                ]
-                for font_path in mincho_paths:
-                    try:
-                        mincho_font = ImageFont.truetype(font_path, 100)  # 名言用、最大
-                        subtitle_mincho_font = ImageFont.truetype(font_path, 45)  # 肩書用
-                        logger.debug(f"明朝体フォント: {font_path}")
-                        break
-                    except (OSError, IOError):
-                        continue
-
-            elif platform.system() == "Darwin":  # macOS
-                gothic_paths = [
-                    "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",  # ヒラギノ角ゴ Bold
-                    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-                ]
-                for font_path in gothic_paths:
-                    try:
-                        gothic_font = ImageFont.truetype(font_path, 80)
-                        logger.debug(f"ゴシック体フォント: {font_path}")
-                        break
-                    except (OSError, IOError):
-                        continue
-
-                mincho_paths = [
-                    "/System/Library/Fonts/ヒラギノ明朝 ProN.ttc",
-                ]
-                for font_path in mincho_paths:
-                    try:
-                        mincho_font = ImageFont.truetype(font_path, 100)
-                        subtitle_mincho_font = ImageFont.truetype(font_path, 45)
-                        logger.debug(f"明朝体フォント: {font_path}")
-                        break
-                    except (OSError, IOError):
-                        continue
-
-            else:  # Linux (GitHub Actions ubuntu-latest)
-                # Noto Sans CJK (fonts-noto-cjk package) - TTCインデックス0で日本語を指定
-                gothic_paths = [
-                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-                    "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
-                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-                    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-                ]
-                for font_path in gothic_paths:
-                    try:
-                        gothic_font = ImageFont.truetype(font_path, 120, index=0)  # 名前用、大きく、日本語指定
-                        logger.info(f"✅ Linux ゴシック体フォント: {font_path} (index=0, size=120)")
-                        break
-                    except (OSError, IOError) as e:
-                        logger.debug(f"フォント読み込み失敗: {font_path} - {e}")
-                        continue
-
-                # Noto Serif CJK for mincho style
-                mincho_paths = [
-                    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
-                    "/usr/share/fonts/truetype/noto/NotoSerifCJK-Bold.ttc",
-                    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
-                    "/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc",
-                    # フォールバック: ゴシック体を明朝代わりに
-                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-                ]
-                for font_path in mincho_paths:
-                    try:
-                        mincho_font = ImageFont.truetype(font_path, 140, index=0)  # 名言用、最大、日本語指定
-                        subtitle_mincho_font = ImageFont.truetype(font_path, 60, index=0)  # 肩書用、日本語指定
-                        logger.info(f"✅ Linux 明朝体フォント: {font_path} (index=0, sizes=140/60)")
-                        break
-                    except (OSError, IOError) as e:
-                        logger.debug(f"フォント読み込み失敗: {font_path} - {e}")
-                        continue
-
-            # フォントが見つからない場合はデフォルトを使用
-            if gothic_font is None or mincho_font is None:
-                logger.error("⚠️ 日本語フォントが見つかりません！デフォルトフォントを使用します。")
-                logger.error(f"⚠️ Platform: {platform.system()}, 画像の文字が文字化けする可能性があります。")
-                gothic_font = ImageFont.load_default()
-                mincho_font = ImageFont.load_default()
-                subtitle_mincho_font = ImageFont.load_default()
-            else:
-                logger.info("✅ 画像用フォント読み込み成功")
-
-            # テキストの位置と色
             width, height = img.size
-            text_color = (255, 255, 255)  # 白色
-            outline_color = (0, 0, 0)  # 黒色（アウトライン）
+
+            # フォントを読み込み
+            fonts = self._load_fonts()
 
             # 肩書を取得
             person_title = get_person_title(person_name)
             if not person_title:
-                person_title = "偉人"  # デフォルト
+                person_title = ""
 
-            # 【上部】名言を配置（明朝体、太字、大きく）
-            # quoteが渡されていれば使用、なければtopicを使用
+            # キャッチコピーを作成（名言 or トピック）
             catchphrase = quote if quote else topic
 
-            # 名言を適切な長さに調整（2行まで）
-            if len(catchphrase) > 30:
-                # 30文字で折り返し
-                quote_line1 = catchphrase[:30]
-                quote_line2 = catchphrase[30:60]
-            else:
-                quote_line1 = catchphrase
-                quote_line2 = ""
+            # テキストを適切な長さに分割（インパクト重視で短く）
+            lines = self._split_catchphrase(catchphrase, max_chars_per_line=12)
 
-            left_margin = 60
-            quote_y_start = 120  # 上部から
+            # ============================================
+            # レイアウト: 左側にテキスト配置
+            # ============================================
+            left_margin = 50
+            current_y = 80
 
-            # 名言1行目
-            self._draw_text_with_outline(
-                draw,
-                quote_line1,
-                left_margin,
-                quote_y_start,
-                mincho_font,
-                text_color,
-                outline_color,
-                outline_width=4,
-                anchor="lt",  # left-top
+            # 【上部】キャッチコピー（黄色、大きな太字）
+            for i, line in enumerate(lines[:3]):  # 最大3行
+                # 1行目は特に大きく、黄色
+                if i == 0:
+                    font = fonts["catchphrase_large"]
+                    color = self.COLORS["yellow"]
+                else:
+                    font = fonts["catchphrase_medium"]
+                    color = self.COLORS["white"]
+
+                self._draw_text_with_shadow(
+                    draw, line, left_margin, current_y, font, color,
+                    outline_width=6, shadow_offset=4
+                )
+                current_y += self._get_font_height(font) + 10
+
+            # 【下部】人物名（白、大きな太字）+ 肩書
+            name_y = height - 180
+            self._draw_text_with_shadow(
+                draw, person_name, left_margin, name_y,
+                fonts["name"], self.COLORS["white"],
+                outline_width=5, shadow_offset=3
             )
 
-            # 名言2行目（あれば）
-            if quote_line2:
-                self._draw_text_with_outline(
-                    draw,
-                    quote_line2,
-                    left_margin,
-                    quote_y_start + 120,
-                    mincho_font,
-                    text_color,
-                    outline_color,
-                    outline_width=4,
-                    anchor="lt",
+            # 肩書（小さめ、オレンジ）
+            if person_title:
+                title_y = name_y + self._get_font_height(fonts["name"]) + 5
+                self._draw_text_with_shadow(
+                    draw, person_title, left_margin, title_y,
+                    fonts["title"], self.COLORS["orange"],
+                    outline_width=3, shadow_offset=2
                 )
 
-            # 【下部】名前と肩書を配置
-            bottom_margin = height - 180  # 下から
-
-            # 名前（ゴシック体、太字、大きく）
-            self._draw_text_with_outline(
-                draw,
-                person_name,
-                left_margin,
-                bottom_margin,
-                gothic_font,
-                text_color,
-                outline_color,
-                outline_width=4,
-                anchor="lt",
-            )
-
-            # 肩書（明朝体、小さめ、名前の下）
-            self._draw_text_with_outline(
-                draw,
-                person_title,
-                left_margin,
-                bottom_margin + 100,
-                subtitle_mincho_font,
-                text_color,
-                outline_color,
-                outline_width=3,
-                anchor="lt",
-            )
-
             img.save(image_path, quality=95)
-            logger.info(f"サムネイルにテキストオーバーレイを追加: 名言「{quote_line1}」、名前「{person_name}」、肩書「{person_title}」")
+            logger.info(f"✅ サムネイル完成: {person_name} - {catchphrase[:20]}...")
 
         except Exception as e:
             logger.warning(f"Failed to add text overlay: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
 
-    @staticmethod
-    def _draw_text_with_outline(
+    def _load_fonts(self) -> dict:
+        """
+        Load fonts for thumbnail text overlay.
+
+        Returns:
+            Dictionary of font objects for different text elements
+        """
+        import platform
+        import os
+
+        fonts = {}
+
+        # フォントサイズ設定（YouTubeサムネイル用に大きく）
+        sizes = {
+            "catchphrase_large": 85,   # メインキャッチ（1行目）
+            "catchphrase_medium": 70,  # キャッチ（2-3行目）
+            "name": 75,                 # 人物名
+            "title": 35,                # 肩書
+        }
+
+        # プラットフォーム別フォントパス
+        if platform.system() == "Windows":
+            font_paths = [
+                "C:/Windows/Fonts/YuGothB.ttc",   # 游ゴシック Bold
+                "C:/Windows/Fonts/meiryob.ttc",  # メイリオ Bold
+                "C:/Windows/Fonts/msgothic.ttc", # MSゴシック
+                "C:/Windows/Fonts/meiryo.ttc",   # メイリオ
+            ]
+        elif platform.system() == "Darwin":
+            font_paths = [
+                "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
+                "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+            ]
+        else:  # Linux
+            font_paths = [
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            ]
+
+        # フォントを読み込み
+        selected_font_path = None
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                selected_font_path = font_path
+                break
+
+        if selected_font_path:
+            try:
+                for key, size in sizes.items():
+                    if platform.system() == "Linux":
+                        fonts[key] = ImageFont.truetype(selected_font_path, size, index=0)
+                    else:
+                        fonts[key] = ImageFont.truetype(selected_font_path, size)
+                logger.info(f"✅ フォント読み込み成功: {selected_font_path}")
+            except Exception as e:
+                logger.warning(f"フォント読み込みエラー: {e}")
+                fonts = self._get_default_fonts(sizes)
+        else:
+            logger.warning("⚠️ 日本語フォントが見つかりません")
+            fonts = self._get_default_fonts(sizes)
+
+        return fonts
+
+    def _get_default_fonts(self, sizes: dict) -> dict:
+        """Get default fonts when Japanese fonts are not available."""
+        fonts = {}
+        for key in sizes:
+            fonts[key] = ImageFont.load_default()
+        return fonts
+
+    def _get_font_height(self, font: ImageFont.FreeTypeFont) -> int:
+        """Get the height of a font."""
+        try:
+            bbox = font.getbbox("あ")
+            return bbox[3] - bbox[1]
+        except Exception:
+            return 50  # デフォルト高さ
+
+    def _split_catchphrase(self, text: str, max_chars_per_line: int = 12) -> list[str]:
+        """
+        Split catchphrase into multiple lines for impact.
+
+        短い行に分割してインパクトを出す
+        """
+        if not text:
+            return []
+
+        # 句読点で分割を試みる
+        delimiters = ["。", "！", "？", "、", "…", " "]
+        lines = []
+        current = ""
+
+        for char in text:
+            current += char
+            if char in delimiters or len(current) >= max_chars_per_line:
+                if current.strip():
+                    lines.append(current.strip())
+                current = ""
+
+        if current.strip():
+            lines.append(current.strip())
+
+        return lines[:4]  # 最大4行
+
+    def _draw_text_with_shadow(
+        self,
         draw: ImageDraw.Draw,
         text: str,
         x: int,
         y: int,
         font: ImageFont.FreeTypeFont,
         fill: tuple,
-        outline: tuple,
-        outline_width: int = 2,
-        anchor: str = "mm",
+        outline_width: int = 4,
+        shadow_offset: int = 3,
     ) -> None:
-        """Draw text with outline for better visibility."""
-        # アウトラインを描画
-        for adj in range(-outline_width, outline_width + 1):
-            for adj2 in range(-outline_width, outline_width + 1):
+        """
+        Draw text with shadow and thick outline for YouTube thumbnail style.
+
+        影 → 太い縁取り → メインテキスト の順で描画
+        """
+        outline_color = self.COLORS["black"]
+        shadow_color = self.COLORS["shadow"]
+
+        # 1. 影を描画（右下にオフセット）
+        for adj in range(-2, 3):
+            for adj2 in range(-2, 3):
                 draw.text(
-                    (x + adj, y + adj2),
+                    (x + shadow_offset + adj, y + shadow_offset + adj2),
                     text,
                     font=font,
-                    fill=outline,
-                    anchor=anchor,
+                    fill=shadow_color,
                 )
-        # メインテキストを描画
-        draw.text((x, y), text, font=font, fill=fill, anchor=anchor)
+
+        # 2. 太い縁取りを描画
+        for adj in range(-outline_width, outline_width + 1):
+            for adj2 in range(-outline_width, outline_width + 1):
+                if adj != 0 or adj2 != 0:
+                    draw.text(
+                        (x + adj, y + adj2),
+                        text,
+                        font=font,
+                        fill=outline_color,
+                    )
+
+        # 3. メインテキストを描画
+        draw.text((x, y), text, font=font, fill=fill)
+

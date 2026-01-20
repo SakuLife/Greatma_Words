@@ -3,6 +3,7 @@ Voice synthesis service using VOICEVOX API.
 """
 
 import asyncio
+import re
 from pathlib import Path
 import tempfile
 
@@ -11,6 +12,83 @@ from pydub import AudioSegment
 
 from app.config import settings
 from app.utils.logger import logger
+
+# 英語→カタカナ変換辞書（VOICEVOXが正しく読み上げるため）
+ENGLISH_TO_KATAKANA = {
+    # よくある英語表記
+    "Todo": "トゥードゥー",
+    "TODO": "トゥードゥー",
+    "todo": "トゥードゥー",
+    "Google": "グーグル",
+    "GOOGLE": "グーグル",
+    "AI": "エーアイ",
+    "Facebook": "フェイスブック",
+    "Amazon": "アマゾン",
+    "Tesla": "テスラ",
+    "Apple": "アップル",
+    "Microsoft": "マイクロソフト",
+    "Windows": "ウィンドウズ",
+    "iPhone": "アイフォン",
+    "iPad": "アイパッド",
+    "Mac": "マック",
+    "PayPal": "ペイパル",
+    "Netflix": "ネットフリックス",
+    "YouTube": "ユーチューブ",
+    "Twitter": "ツイッター",
+    "Instagram": "インスタグラム",
+    "LinkedIn": "リンクトイン",
+    "Uber": "ウーバー",
+    "Airbnb": "エアビーアンドビー",
+    "SpaceX": "スペースエックス",
+    "OpenAI": "オープンエーアイ",
+    "ChatGPT": "チャットジーピーティー",
+    "GPT": "ジーピーティー",
+    # ビジネス用語
+    "CEO": "シーイーオー",
+    "CTO": "シーティーオー",
+    "CFO": "シーエフオー",
+    "COO": "シーオーオー",
+    "MBA": "エムビーエー",
+    "ROI": "アールオーアイ",
+    "KPI": "ケーピーアイ",
+    "PDCA": "ピーディーシーエー",
+    "OKR": "オーケーアール",
+    "M&A": "エムアンドエー",
+    "IPO": "アイピーオー",
+    "VC": "ブイシー",
+    "IT": "アイティー",
+    "DX": "ディーエックス",
+    "SaaS": "サース",
+    "PaaS": "パース",
+    "IaaS": "イアース",
+    "B2B": "ビートゥービー",
+    "B2C": "ビートゥーシー",
+    "API": "エーピーアイ",
+    # 書籍・概念
+    "Zero to One": "ゼロ・トゥ・ワン",
+    "Lean Startup": "リーン・スタートアップ",
+    "Startup": "スタートアップ",
+    "startup": "スタートアップ",
+    "Innovation": "イノベーション",
+    "innovation": "イノベーション",
+    "Disruption": "ディスラプション",
+    "disruption": "ディスラプション",
+    # 人名（よく出る人物）
+    "Elon Musk": "イーロン・マスク",
+    "Jeff Bezos": "ジェフ・ベゾス",
+    "Peter Thiel": "ピーター・ティール",
+    "Steve Jobs": "スティーブ・ジョブズ",
+    "Bill Gates": "ビル・ゲイツ",
+    "Mark Zuckerberg": "マーク・ザッカーバーグ",
+    "Warren Buffett": "ウォーレン・バフェット",
+    "Charlie Munger": "チャーリー・マンガー",
+    "Larry Page": "ラリー・ペイジ",
+    "Sergey Brin": "セルゲイ・ブリン",
+    "Tim Cook": "ティム・クック",
+    "Satya Nadella": "サティア・ナデラ",
+    "Jack Ma": "ジャック・マー",
+    "Sam Altman": "サム・アルトマン",
+}
 
 
 class VoiceSynthesizer:
@@ -59,11 +137,7 @@ class VoiceSynthesizer:
                 if not text:
                     continue
 
-                # 進捗表示（10フレーズごと、または最後）
-                if (i + 1) % 10 == 0 or (i + 1) == total:
-                    logger.info(f"音声合成進捗: {i + 1}/{total} フレーズ完了 ({((i+1)/total*100):.1f}%)")
-                else:
-                    logger.debug(f"Processing subtitle {i + 1}/{total}: {text[:30]}...")
+                logger.debug(f"Processing subtitle {i + 1}/{total}: {text[:30]}...")
 
                 audio_data = await self._synthesize_chunk(text, speaker_id)
                 audio_chunks.append(audio_data)
@@ -168,6 +242,33 @@ class VoiceSynthesizer:
 
         return output_path, None
 
+    def _convert_english_to_katakana(self, text: str) -> str:
+        """
+        英語表記をカタカナに変換する。
+        VOICEVOXがアルファベットを一文字ずつ読み上げる問題を回避する。
+
+        Args:
+            text: 変換前のテキスト
+
+        Returns:
+            カタカナ変換後のテキスト
+        """
+        result = text
+
+        # 辞書に基づいて変換（長い文字列から順に置換）
+        for english, katakana in sorted(
+            ENGLISH_TO_KATAKANA.items(), key=lambda x: len(x[0]), reverse=True
+        ):
+            result = result.replace(english, katakana)
+
+        # 残った英単語をログで警告（デバッグ用）
+        remaining_english = re.findall(r'[A-Za-z]{2,}', result)
+        if remaining_english:
+            unique_words = list(set(remaining_english))[:5]  # 最大5つまで
+            logger.debug(f"未変換の英語: {', '.join(unique_words)}")
+
+        return result
+
     async def _synthesize_chunk(self, text: str, speaker_id: int) -> bytes:
         """
         Synthesize a single text chunk.
@@ -182,6 +283,9 @@ class VoiceSynthesizer:
         Raises:
             RuntimeError: If synthesis fails
         """
+        # 英語→カタカナ変換
+        text = self._convert_english_to_katakana(text)
+
         try:
             async with aiohttp.ClientSession() as session:
                 # Step 1: Generate audio query

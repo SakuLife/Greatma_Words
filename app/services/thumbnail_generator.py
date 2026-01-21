@@ -216,7 +216,9 @@ class ThumbnailGenerator:
                     logger.info(f"KIE AI image URL: {image_url}")
 
                     # 画像をダウンロード
-                    img_response = requests.get(image_url, timeout=30)
+                    logger.info(f"Downloading thumbnail image from: {image_url}")
+                    img_response = requests.get(image_url, timeout=60)
+                    logger.info(f"Download response status: {img_response.status_code}, size: {len(img_response.content)} bytes")
                     img_response.raise_for_status()
 
                     # 画像を開いてYouTubeサムネイルサイズにリサイズ

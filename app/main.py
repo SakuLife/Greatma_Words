@@ -17,6 +17,7 @@ from app.models.schemas import (
 from app.services.script_generator import ScriptGenerator
 from app.services.image_generator import ImageGenerator
 from app.services.thumbnail_generator import ThumbnailGenerator
+from app.services.thumbnail_copywriter import ThumbnailCopywriter
 from app.services.voice_synthesizer import VoiceSynthesizer
 from app.services.video_creator import VideoCreator
 from app.services.youtube_uploader import YouTubeUploader
@@ -93,6 +94,7 @@ class VideoGenerationOrchestrator:
         self.script_generator = ScriptGenerator()
         self.image_generator = ImageGenerator()
         self.thumbnail_generator = ThumbnailGenerator()
+        self.thumbnail_copywriter = ThumbnailCopywriter()
         self.voice_synthesizer = VoiceSynthesizer()
         self.video_creator = VideoCreator()
         self.youtube_uploader = YouTubeUploader()
@@ -261,12 +263,21 @@ class VideoGenerationOrchestrator:
                 catchphrase = self.description_generator.extract_catchphrase(script)
                 logger.info(f"Extracted catchphrase for thumbnail: {catchphrase}")
 
+                # AIでキャッチコピーを生成（「必見」などの固定文言を避ける）
+                thumbnail_copy = await self.thumbnail_copywriter.generate_thumbnail_copy(
+                    person_name=config.person_name,
+                    topic=config.topic,
+                    quote=catchphrase,
+                )
+                logger.info(f"Generated thumbnail copy: {thumbnail_copy['main_copy']} / {thumbnail_copy['sub_copy']}")
+
                 await self.thumbnail_generator.generate_thumbnail(
                     person_name=config.person_name,
                     topic=config.topic,
                     output_path=thumbnail_path,
                     style="professional",
                     quote=catchphrase,
+                    thumbnail_copy=thumbnail_copy,
                 )
 
                 project.thumbnail_path = thumbnail_path

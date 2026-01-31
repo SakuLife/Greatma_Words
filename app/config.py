@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     # YouTube API
     youtube_client_secrets_file: str = "client_secrets.json"
-    youtube_oauth_scopes: str = "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload"
+    youtube_oauth_scopes: str = "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/yt-analytics.readonly"
     youtube_default_category: int = 22  # People & Blogs
     youtube_default_privacy: Literal["public", "private", "unlisted"] = "private"
 
@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     # Gemini Pro: 広く互換性のある安定モデル
     default_llm_model: str = "models/gemini-pro-latest"
     default_temperature: float = 0.7
+
+    # Thumbnail A/B Testing
+    ab_test_enabled: bool = False  # A/Bテストを有効にするか
+    ab_test_rotation_days: int = 7  # サムネイル切り替え間隔（日）
+    ab_test_min_impressions: int = 100  # 勝者判定に必要な最低インプレッション数
+    ab_test_min_ctr_diff: float = 0.5  # 勝者判定に必要な最低CTR差（ポイント）
+    ab_test_max_rotations: int = 4  # 最大ローテーション回数（超えたら強制終了）
 
     # Thumbnail Generation
     use_thumbnail_generation: bool = True

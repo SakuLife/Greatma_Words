@@ -7,7 +7,13 @@ import re
 from collections import Counter
 from typing import Any
 
-from app.services.youtube_analytics import ChannelStats, VideoStats, YouTubeAnalytics
+from app.services.youtube_analytics import (
+    ChannelStats,
+    RetentionData,
+    SubscriberGrowth,
+    VideoStats,
+    YouTubeAnalytics,
+)
 from app.utils.logger import logger
 
 
@@ -302,14 +308,65 @@ class ContentAnalyzer:
 
         return themes if themes else ["経営哲学", "AI時代の思考法", "成功の法則"]
 
+    async def _get_advanced_analytics(self) -> dict:
+        """
+        Analytics API v2から高度な分析データを取得
+
+        Returns:
+            登録者推移・注目動画・維持率のデータ
+        """
+        result: dict = {
+            "subscriber_growth": [],
+            "trending_videos": [],
+            "retention_insights": [],
+        }
+
+        try:
+            # 登録者推移（7日間）
+            growth = await self.youtube_analytics.get_subscriber_growth(days=7)
+            result["subscriber_growth"] = growth
+            logger.info(f"登録者推移取得: {len(growth)}日分")
+        except Exception as e:
+            logger.warning(f"登録者推移の取得に失敗（スキップ）: {e}")
+
+        try:
+            # 注目動画
+            trending = await self.youtube_analytics.detect_trending_videos(days=7)
+            result["trending_videos"] = trending
+            logger.info(f"注目動画検出: {len(trending)}件")
+        except Exception as e:
+            logger.warning(f"注目動画の検出に失敗（スキップ）: {e}")
+
+        # 注目動画の維持率
+        for video in result["trending_videos"][:3]:
+            try:
+                ret = await self.youtube_analytics.get_audience_retention(
+                    video["video_id"]
+                )
+                result["retention_insights"].append(
+                    {
+                        "video_id": video["video_id"],
+                        "title": video.get("title", ""),
+                        "average_retention": ret.average_retention,
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"維持率取得失敗 ({video['video_id']}): {e}")
+
+        return result
+
     async def get_content_suggestions_for_llm(self) -> str:
         """
         Get content suggestions formatted for LLM input.
+        Analytics API v2の高度な分析データも含む。
 
         Returns:
             Formatted string with analysis and recommendations
         """
         analysis = await self.analyze_channel_performance()
+
+        # Analytics API v2データを取得（失敗しても基本分析は続行）
+        advanced = await self._get_advanced_analytics()
 
         # LLM用にフォーマット
         suggestions = f"""
@@ -334,6 +391,40 @@ class ContentAnalyzer:
         ):
             suggestions += f"{i}. {video['title']} ({video['views']:,} views, {video['engagement']:.2f}% engagement)\n"
 
+        # 登録者推移セクション
+        if advanced["subscriber_growth"]:
+            total_gained = sum(s.gained for s in advanced["subscriber_growth"])
+            total_lost = sum(s.lost for s in advanced["subscriber_growth"])
+            net = total_gained - total_lost
+            suggestions += f"""
+## チャンネル登録者推移（直近7日間）
+- 新規登録: +{total_gained}人
+- 解除: -{total_lost}人
+- 純増減: {"+" if net >= 0 else ""}{net}人
+"""
+
+        # 注目動画セクション
+        if advanced["trending_videos"]:
+            suggestions += "\n## 今週伸びている動画（前週比）\n"
+            for t in advanced["trending_videos"][:5]:
+                growth_str = (
+                    f"{t['growth_rate']:.1f}倍"
+                    if t.get("growth_rate", 0) != float("inf")
+                    else "新規"
+                )
+                suggestions += (
+                    f"- {t.get('title', t['video_id'])}: "
+                    f"成長率{growth_str} ({t['previous_views']}→{t['current_views']}再生)\n"
+                )
+
+        # 維持率インサイト
+        if advanced["retention_insights"]:
+            suggestions += "\n## 視聴維持率（注目動画）\n"
+            for r in advanced["retention_insights"]:
+                suggestions += (
+                    f"- {r['title'][:30]}: 平均維持率{r['average_retention']:.1f}%\n"
+                )
+
         suggestions += f"""
 ## 推奨キーワード
 {', '.join(analysis['recommendations']['recommended_keywords'][:10])}
@@ -354,7 +445,9 @@ class ContentAnalyzer:
 ---
 
 上記のデータに基づいて、次回の動画を計画してください。
+伸びている動画のテーマや視聴維持率の高い動画の特徴を参考に、
 視聴者が興味を持ち、高いエンゲージメントが期待できるテーマと人物を選んでください。
+登録者推移も考慮し、チャンネルの成長に寄与するコンテンツを提案してください。
 """
 
         return suggestions

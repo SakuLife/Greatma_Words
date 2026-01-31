@@ -167,6 +167,55 @@ class DriveManager:
             logger.error(f"Failed to upload file to Google Drive: {e}")
             raise RuntimeError(f"Failed to upload file to Google Drive: {e}") from e
 
+    async def download_file(
+        self, file_id_or_url: str, output_path: Path
+    ) -> Path:
+        """
+        Google Driveからファイルをダウンロード
+
+        Args:
+            file_id_or_url: ファイルIDまたはDrive URL
+            output_path: ダウンロード先パス
+
+        Returns:
+            ダウンロードしたファイルのパス
+        """
+        if not self.service:
+            await self.authenticate()
+
+        # URLからファイルIDを抽出
+        file_id = file_id_or_url
+        if "/d/" in file_id_or_url:
+            # https://drive.google.com/file/d/FILE_ID/view 形式
+            file_id = file_id_or_url.split("/d/")[1].split("/")[0]
+        elif "id=" in file_id_or_url:
+            # https://drive.google.com/open?id=FILE_ID 形式
+            file_id = file_id_or_url.split("id=")[1].split("&")[0]
+
+        try:
+            from io import BytesIO
+
+            from googleapiclient.http import MediaIoBaseDownload
+
+            request = self.service.files().get_media(fileId=file_id)
+            buffer = BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
+
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "wb") as f:
+                f.write(buffer.getvalue())
+
+            logger.info(f"ファイルダウンロード完了: {output_path}")
+            return output_path
+
+        except Exception as e:
+            logger.error(f"Driveダウンロード失敗 ({file_id}): {e}")
+            raise RuntimeError(f"Driveダウンロード失敗: {e}") from e
+
     async def create_folder(
         self, folder_name: str, parent_folder_id: str | None = None
     ) -> str:

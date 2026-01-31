@@ -124,10 +124,16 @@ class SheetsManager:
         Returns:
             True if successful, False otherwise
         """
+        if not self.spreadsheet_id:
+            logger.error("❌ Google Sheets ID is not configured (GOOGLE_SHEETS_ID)")
+            return False
+
         if not self.service:
+            logger.info("Google Sheets service not initialized, authenticating...")
             await self.authenticate()
 
         logger.info(f"Logging video production to Google Sheets: {person_name}")
+        logger.info(f"   SpreadsheetID: {self.spreadsheet_id}")
 
         try:
             # Format data
@@ -168,7 +174,11 @@ class SheetsManager:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to log video production: {e}")
+            logger.error(f"❌ Failed to log video production: {e}")
+            logger.error(f"   SpreadsheetID: {self.spreadsheet_id}")
+            logger.error(f"   SheetName: {sheet_name}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
 
     async def update_task_status(
@@ -452,3 +462,610 @@ class SheetsManager:
         except Exception as e:
             logger.error(f"Failed to get video stats: {e}")
             return {}
+
+    # ========================================
+    # 週次分析・A/Bテスト用メソッド
+    # ========================================
+
+    async def ensure_sheet_exists(
+        self, sheet_name: str, headers: list[str]
+    ) -> None:
+        """
+        シートが存在しない場合は作成し、ヘッダー行を書き込む
+
+        Args:
+            sheet_name: シート名
+            headers: ヘッダー行の値リスト
+        """
+        if not self.service:
+            await self.authenticate()
+
+        try:
+            # 既存のシート一覧を取得
+            spreadsheet = (
+                self.service.spreadsheets()
+                .get(spreadsheetId=self.spreadsheet_id)
+                .execute()
+            )
+
+            existing_sheets = [
+                s["properties"]["title"] for s in spreadsheet.get("sheets", [])
+            ]
+
+            if sheet_name in existing_sheets:
+                logger.debug(f"シート '{sheet_name}' は既に存在します")
+                return
+
+            # シートを新規作成
+            self.service.spreadsheets().batchUpdate(
+                spreadsheetId=self.spreadsheet_id,
+                body={
+                    "requests": [
+                        {
+                            "addSheet": {
+                                "properties": {"title": sheet_name}
+                            }
+                        }
+                    ]
+                },
+            ).execute()
+
+            # ヘッダー行を書き込み
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!A1",
+                valueInputOption="RAW",
+                body={"values": [headers]},
+            ).execute()
+
+            logger.info(f"シート '{sheet_name}' を作成しました")
+
+        except Exception as e:
+            logger.error(f"シート作成に失敗 ({sheet_name}): {e}")
+            raise
+
+    async def write_weekly_analytics(
+        self,
+        subscriber_data: list[dict],
+        trending_videos: list[dict],
+        retention_data: list[dict],
+        report_date: str,
+        sheet_name: str = "週次分析レポート",
+    ) -> bool:
+        """
+        週次分析結果をGoogle Sheetsに書き込む
+
+        Args:
+            subscriber_data: 登録者推移データ [{date, gained, lost, net}]
+            trending_videos: 注目動画 [{video_id, title, current_views, previous_views, growth_rate}]
+            retention_data: 維持率データ [{video_id, title, average_retention}]
+            report_date: レポート日 (YYYY-MM-DD)
+            sheet_name: シート名
+
+        Returns:
+            成功したらTrue
+        """
+        if not self.service:
+            await self.authenticate()
+
+        headers = [
+            "レポート日", "期間", "登録者増加", "登録者減少", "純増減",
+            "注目動画ID", "注目動画タイトル", "視聴回数(今週)",
+            "視聴回数(先週)", "成長率", "平均維持率(%)",
+        ]
+
+        try:
+            await self.ensure_sheet_exists(sheet_name, headers)
+
+            rows = []
+
+            # 登録者サマリー行
+            total_gained = sum(d.get("gained", 0) for d in subscriber_data)
+            total_lost = sum(d.get("lost", 0) for d in subscriber_data)
+            period = ""
+            if subscriber_data:
+                dates = [d["date"] for d in subscriber_data]
+                period = f"{min(dates)} ~ {max(dates)}"
+
+            # 注目動画ごとに1行
+            if trending_videos:
+                for video in trending_videos:
+                    # 維持率を検索
+                    avg_ret = ""
+                    for r in retention_data:
+                        if r.get("video_id") == video.get("video_id"):
+                            avg_ret = f"{r.get('average_retention', 0):.1f}"
+                            break
+
+                    growth_rate = video.get("growth_rate", 0)
+                    growth_str = (
+                        f"{growth_rate:.1f}倍"
+                        if growth_rate != float("inf")
+                        else "新規"
+                    )
+
+                    rows.append([
+                        report_date,
+                        period,
+                        total_gained,
+                        total_lost,
+                        total_gained - total_lost,
+                        video.get("video_id", ""),
+                        video.get("title", "不明"),
+                        video.get("current_views", 0),
+                        video.get("previous_views", 0),
+                        growth_str,
+                        avg_ret,
+                    ])
+            else:
+                # 注目動画がなくても登録者データは記録
+                rows.append([
+                    report_date, period,
+                    total_gained, total_lost, total_gained - total_lost,
+                    "", "", "", "", "", "",
+                ])
+
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!A:K",
+                valueInputOption="RAW",
+                body={"values": rows},
+            ).execute()
+
+            logger.info(f"週次分析レポートを記録: {len(rows)}行")
+            return True
+
+        except Exception as e:
+            logger.error(f"週次分析レポートの書き込みに失敗: {e}")
+            return False
+
+    async def write_ab_test_results(
+        self,
+        test_results: list[dict],
+        sheet_name: str = "サムネイルA/Bテスト",
+    ) -> bool:
+        """
+        A/Bテスト結果をGoogle Sheetsに書き込む（全行上書き）
+
+        Args:
+            test_results: テスト結果リスト
+            sheet_name: シート名
+
+        Returns:
+            成功したらTrue
+        """
+        if not self.service:
+            await self.authenticate()
+
+        headers = [
+            "動画ID", "動画タイトル", "ステータス", "現在のバリアント",
+            "Aコピー", "Aスタイル", "Aインプレッション", "A CTR(%)", "A表示日数",
+            "Bコピー", "Bスタイル", "Bインプレッション", "B CTR(%)", "B表示日数",
+            "勝者", "作成日", "最終切替日", "完了日",
+        ]
+
+        try:
+            await self.ensure_sheet_exists(sheet_name, headers)
+
+            if not test_results:
+                logger.info("A/Bテスト結果なし（書き込みスキップ）")
+                return True
+
+            rows = []
+            for t in test_results:
+                rows.append([
+                    t.get("video_id", ""),
+                    t.get("video_title", ""),
+                    t.get("status", ""),
+                    t.get("current_variant", ""),
+                    t.get("variant_a_copy", ""),
+                    t.get("variant_a_style", ""),
+                    t.get("variant_a_impressions", 0),
+                    t.get("variant_a_ctr", 0),
+                    t.get("variant_a_days", 0),
+                    t.get("variant_b_copy", ""),
+                    t.get("variant_b_style", ""),
+                    t.get("variant_b_impressions", 0),
+                    t.get("variant_b_ctr", 0),
+                    t.get("variant_b_days", 0),
+                    t.get("winner", ""),
+                    t.get("created_at", ""),
+                    t.get("last_rotated_at", ""),
+                    t.get("completed_at", ""),
+                ])
+
+            # ヘッダー行以降をクリアして書き直し
+            self.service.spreadsheets().values().clear(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!A2:R",
+            ).execute()
+
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!A2",
+                valueInputOption="RAW",
+                body={"values": rows},
+            ).execute()
+
+            logger.info(f"A/Bテスト結果を記録: {len(rows)}件")
+            return True
+
+        except Exception as e:
+            logger.error(f"A/Bテスト結果の書き込みに失敗: {e}")
+            return False
+
+    async def read_ab_test_state(
+        self, sheet_name: str = "サムネイルA/Bテスト"
+    ) -> list[dict]:
+        """
+        A/Bテストの現在の状態をGoogle Sheetsから読み込む
+
+        Args:
+            sheet_name: シート名
+
+        Returns:
+            テスト状態のリスト
+        """
+        if not self.service:
+            await self.authenticate()
+
+        try:
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .get(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"{sheet_name}!A:R",
+                )
+                .execute()
+            )
+
+            values = result.get("values", [])
+            if len(values) <= 1:
+                return []
+
+            headers = values[0]
+            tests = []
+            for row in values[1:]:
+                test = {}
+                for i, header in enumerate(headers):
+                    test[header] = row[i] if i < len(row) else ""
+                tests.append(test)
+
+            logger.info(f"A/Bテスト状態を読み込み: {len(tests)}件")
+            return tests
+
+        except Exception as e:
+            logger.warning(f"A/Bテスト状態の読み込みに失敗（シート未作成の可能性）: {e}")
+            return []
+
+    # ========================================
+    # 包括的チャンネル分析用メソッド (Phase 1)
+    # ========================================
+
+    async def write_deep_analysis(
+        self,
+        analysis_data: dict[str, Any],
+        sheet_name: str = "チャンネル詳細分析",
+    ) -> bool:
+        """
+        包括的チャンネル分析結果をGoogle Sheetsに書き込む
+
+        Args:
+            analysis_data: 分析データ辞書
+            sheet_name: シート名
+
+        Returns:
+            成功したらTrue
+        """
+        if not self.service:
+            await self.authenticate()
+
+        headers = [
+            "分析日", "分析期間", "登録者数", "総再生数", "総動画数",
+            "主要トラフィック", "トラフィック詳細",
+            "主要年齢層", "性別比率",
+            "主要デバイス", "デバイス詳細",
+            "登録者獲得TOP動画", "登録者獲得数",
+            "推奨投稿時間", "投稿時間信頼度",
+        ]
+
+        try:
+            await self.ensure_sheet_exists(sheet_name, headers)
+
+            # データ行を構築
+            traffic_detail = ""
+            if analysis_data.get("traffic_sources"):
+                traffic_detail = " / ".join(
+                    f"{t['source_type']}:{t['percentage']}%"
+                    for t in analysis_data["traffic_sources"][:5]
+                )
+
+            device_detail = ""
+            if analysis_data.get("devices"):
+                device_detail = " / ".join(
+                    f"{d['device_type']}:{d['percentage']}%"
+                    for d in analysis_data["devices"][:5]
+                )
+
+            top_sub_video = ""
+            top_sub_count = ""
+            if analysis_data.get("top_subscriber_videos"):
+                top = analysis_data["top_subscriber_videos"][0]
+                top_sub_video = top.get("title", "")[:40]
+                top_sub_count = str(top.get("subscribers_gained", 0))
+
+            row = [
+                analysis_data.get("analysis_date", ""),
+                f"過去{analysis_data.get('analysis_period_days', 90)}日",
+                analysis_data.get("subscriber_count", 0),
+                analysis_data.get("total_views", 0),
+                analysis_data.get("total_videos", 0),
+                analysis_data.get("top_traffic_source", ""),
+                traffic_detail,
+                analysis_data.get("top_age_group", ""),
+                analysis_data.get("gender_ratio", ""),
+                analysis_data.get("primary_device", ""),
+                device_detail,
+                top_sub_video,
+                top_sub_count,
+                analysis_data.get("recommended_publish_time", ""),
+                analysis_data.get("upload_time_confidence", ""),
+            ]
+
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!A:O",
+                valueInputOption="RAW",
+                body={"values": [row]},
+            ).execute()
+
+            logger.info(f"チャンネル詳細分析を記録: {sheet_name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"チャンネル詳細分析の書き込みに失敗: {e}")
+            return False
+
+    async def write_upload_time_analysis(
+        self,
+        day_performances: list[dict],
+        best_time: str,
+        confidence: float,
+        sheet_name: str = "投稿時間分析",
+    ) -> bool:
+        """
+        投稿時間分析結果をGoogle Sheetsに書き込む
+
+        Args:
+            day_performances: 曜日別パフォーマンスデータ
+            best_time: 推奨投稿時間
+            confidence: 信頼度
+            sheet_name: シート名
+
+        Returns:
+            成功したらTrue
+        """
+        if not self.service:
+            await self.authenticate()
+
+        headers = [
+            "分析日", "推奨投稿時間", "信頼度",
+            "曜日", "投稿数", "平均初動再生数(48h)",
+        ]
+
+        try:
+            await self.ensure_sheet_exists(sheet_name, headers)
+
+            analysis_date = datetime.now().strftime("%Y-%m-%d")
+            rows = []
+
+            for dp in day_performances:
+                rows.append([
+                    analysis_date,
+                    best_time,
+                    f"{confidence:.0%}",
+                    f"{dp.get('day_name', '')}曜日",
+                    dp.get("total_uploads", 0),
+                    f"{dp.get('avg_initial_views_48h', 0):.0f}",
+                ])
+
+            if not rows:
+                rows.append([analysis_date, best_time, f"{confidence:.0%}", "", "", ""])
+
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!A:F",
+                valueInputOption="RAW",
+                body={"values": rows},
+            ).execute()
+
+            logger.info(f"投稿時間分析を記録: {len(rows)}行")
+            return True
+
+        except Exception as e:
+            logger.error(f"投稿時間分析の書き込みに失敗: {e}")
+            return False
+
+    async def write_competitor_analysis(
+        self,
+        competitor_data: dict[str, Any],
+        sheet_name: str = "競合分析",
+    ) -> bool:
+        """
+        競合分析結果をGoogle Sheetsに書き込む
+
+        Args:
+            competitor_data: 競合分析データ
+            sheet_name: シート名
+
+        Returns:
+            成功したらTrue
+        """
+        if not self.service:
+            await self.authenticate()
+
+        headers = [
+            "調査日", "検索クエリ", "動画タイトル", "チャンネル名",
+            "再生回数", "いいね数", "エンゲージメント率",
+            "人物名", "ギャップ機会",
+        ]
+
+        try:
+            await self.ensure_sheet_exists(sheet_name, headers)
+
+            rows = []
+            analysis_date = competitor_data.get("analyzed_at", datetime.now().strftime("%Y-%m-%d"))
+
+            # 競合動画
+            for video in competitor_data.get("videos", [])[:30]:
+                rows.append([
+                    analysis_date,
+                    ", ".join(competitor_data.get("search_queries", [])),
+                    video.get("title", "")[:60],
+                    video.get("channel_title", ""),
+                    video.get("view_count", 0),
+                    video.get("like_count", 0),
+                    f"{video.get('engagement_rate', 0):.2f}%",
+                    "",  # 人物名は後で分析
+                    "",
+                ])
+
+            # ギャップ機会
+            for gap in competitor_data.get("gap_opportunities", []):
+                rows.append([
+                    analysis_date,
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    gap.get("person", ""),
+                    gap.get("reason", ""),
+                ])
+
+            if rows:
+                self.service.spreadsheets().values().append(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"{sheet_name}!A:I",
+                    valueInputOption="RAW",
+                    body={"values": rows},
+                ).execute()
+
+            logger.info(f"競合分析を記録: {len(rows)}行")
+            return True
+
+        except Exception as e:
+            logger.error(f"競合分析の書き込みに失敗: {e}")
+            return False
+
+    async def write_content_strategy(
+        self,
+        strategy_data: dict[str, Any],
+        sheet_name: str = "コンテンツ戦略",
+    ) -> bool:
+        """
+        コンテンツ戦略をGoogle Sheetsに書き込む
+
+        Args:
+            strategy_data: 戦略データ
+            sheet_name: シート名
+
+        Returns:
+            成功したらTrue
+        """
+        if not self.service:
+            await self.authenticate()
+
+        headers = [
+            "生成日", "推奨人物", "推奨テーマ", "フック戦略",
+            "構成パターン", "差別化ポイント",
+            "タイトル案", "ハッシュタグ案",
+            "推奨投稿日時", "理由",
+        ]
+
+        try:
+            await self.ensure_sheet_exists(sheet_name, headers)
+
+            rows = []
+            strategy_date = strategy_data.get("date", datetime.now().strftime("%Y-%m-%d"))
+
+            for suggestion in strategy_data.get("next_video_suggestions", []):
+                rows.append([
+                    strategy_date,
+                    suggestion.get("person", ""),
+                    suggestion.get("topic", ""),
+                    suggestion.get("hook_strategy", ""),
+                    suggestion.get("structure", ""),
+                    suggestion.get("differentiation", ""),
+                    suggestion.get("title_suggestion", ""),
+                    suggestion.get("hashtags", ""),
+                    strategy_data.get("upload_schedule", {}).get("publish_at", ""),
+                    suggestion.get("reason", ""),
+                ])
+
+            if rows:
+                self.service.spreadsheets().values().append(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"{sheet_name}!A:J",
+                    valueInputOption="RAW",
+                    body={"values": rows},
+                ).execute()
+
+            logger.info(f"コンテンツ戦略を記録: {len(rows)}行")
+            return True
+
+        except Exception as e:
+            logger.error(f"コンテンツ戦略の書き込みに失敗: {e}")
+            return False
+
+    async def read_latest_strategy(
+        self, sheet_name: str = "コンテンツ戦略"
+    ) -> list[dict]:
+        """
+        最新のコンテンツ戦略をGoogle Sheetsから読み込む
+
+        Args:
+            sheet_name: シート名
+
+        Returns:
+            戦略データのリスト
+        """
+        if not self.service:
+            await self.authenticate()
+
+        try:
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .get(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"{sheet_name}!A:J",
+                )
+                .execute()
+            )
+
+            values = result.get("values", [])
+            if len(values) <= 1:
+                return []
+
+            headers = values[0]
+            strategies = []
+            for row in values[1:]:
+                strategy = {}
+                for i, header in enumerate(headers):
+                    strategy[header] = row[i] if i < len(row) else ""
+                strategies.append(strategy)
+
+            # 最新の日付のもののみ返す
+            if strategies:
+                latest_date = strategies[-1].get("生成日", "")
+                strategies = [s for s in strategies if s.get("生成日") == latest_date]
+
+            logger.info(f"コンテンツ戦略を読み込み: {len(strategies)}件")
+            return strategies
+
+        except Exception as e:
+            logger.warning(f"コンテンツ戦略の読み込みに失敗: {e}")
+            return []

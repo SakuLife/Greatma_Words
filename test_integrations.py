@@ -21,27 +21,27 @@ async def test_discord() -> bool:
     print("=" * 60)
 
     if not settings.discord_webhook_url:
-        print("❌ Discord webhook URL not configured in .env")
+        print("[FAIL] Discord webhook URL not configured in .env")
         return False
 
     try:
         notifier = DiscordNotifier()
         success = await notifier.send_message(
-            content="✅ Discord連携テスト成功！\n\nGreatMan Words Generatorからの通知です。",
-            title="🎉 接続確認",
+            content="Discord test successful!\n\nGreatMan Words Generator notification test.",
+            title="Connection Test",
             color=0x00FF00,  # Green
         )
 
         if success:
-            print("✅ Discord notification sent successfully!")
-            print(f"   Check your Discord channel for the message.")
+            print("[PASS] Discord notification sent successfully!")
+            print("       Check your Discord channel for the message.")
             return True
         else:
-            print("❌ Failed to send Discord notification")
+            print("[FAIL] Failed to send Discord notification")
             return False
 
     except Exception as e:
-        print(f"❌ Discord test failed: {e}")
+        print(f"[FAIL] Discord test failed: {e}")
         return False
 
 
@@ -52,16 +52,16 @@ async def test_google_drive() -> bool:
     print("=" * 60)
 
     if not settings.google_drive_folder_id:
-        print("❌ Google Drive folder ID not configured in .env")
+        print("[FAIL] Google Drive folder ID not configured in .env")
         return False
 
     try:
         manager = DriveManager()
 
         # Authenticate
-        print("🔐 Authenticating with Google Drive...")
+        print("[INFO] Authenticating with Google Drive...")
         await manager.authenticate()
-        print("✅ Authentication successful!")
+        print("[PASS] Authentication successful!")
 
         # Create test file
         test_file = Path("test_upload.txt")
@@ -71,16 +71,16 @@ async def test_google_drive() -> bool:
         )
 
         # Upload
-        print("📤 Uploading test file...")
+        print("[INFO] Uploading test file...")
         result = await manager.upload_file(
             test_file,
             file_name="GreatMan_Words_Test.txt",
         )
 
-        print("✅ File uploaded successfully!")
-        print(f"   File ID: {result['id']}")
-        print(f"   URL: {result['url']}")
-        print(f"   Size: {result['size']} bytes")
+        print("[PASS] File uploaded successfully!")
+        print(f"       File ID: {result['id']}")
+        print(f"       URL: {result['url']}")
+        print(f"       Size: {result['size']} bytes")
 
         # Clean up
         test_file.unlink()
@@ -88,7 +88,7 @@ async def test_google_drive() -> bool:
         return True
 
     except Exception as e:
-        print(f"❌ Google Drive test failed: {e}")
+        print(f"[FAIL] Google Drive test failed: {e}")
         if Path("test_upload.txt").exists():
             Path("test_upload.txt").unlink()
         return False
@@ -101,22 +101,22 @@ async def test_google_sheets() -> bool:
     print("=" * 60)
 
     if not settings.google_sheets_id:
-        print("❌ Google Sheets ID not configured in .env")
+        print("[FAIL] Google Sheets ID not configured in .env")
         return False
 
     try:
         manager = SheetsManager()
 
         # Authenticate
-        print("🔐 Authenticating with Google Sheets...")
+        print("[INFO] Authenticating with Google Sheets...")
         await manager.authenticate()
-        print("✅ Authentication successful!")
+        print("[PASS] Authentication successful!")
 
         # Log test entry
-        print("📝 Writing test log entry...")
+        print("[INFO] Writing test log entry...")
         success = await manager.log_video_production(
-            person_name="テスト太郎",
-            theme="統合テスト",
+            person_name="Test User",
+            theme="Integration Test",
             video_duration=120.0,  # 2 minutes
             generation_time=60.0,  # 1 minute
             youtube_url="https://youtube.com/test",
@@ -125,18 +125,18 @@ async def test_google_sheets() -> bool:
         )
 
         if success:
-            print("✅ Test log entry written successfully!")
-            print(f"   Check your Google Sheet:")
+            print("[PASS] Test log entry written successfully!")
+            print(f"       Check your Google Sheet:")
             print(
-                f"   https://docs.google.com/spreadsheets/d/{settings.google_sheets_id}"
+                f"       https://docs.google.com/spreadsheets/d/{settings.google_sheets_id}"
             )
             return True
         else:
-            print("❌ Failed to write test log entry")
+            print("[FAIL] Failed to write test log entry")
             return False
 
     except Exception as e:
-        print(f"❌ Google Sheets test failed: {e}")
+        print(f"[FAIL] Google Sheets test failed: {e}")
         return False
 
 
@@ -147,30 +147,30 @@ async def test_youtube() -> bool:
     print("=" * 60)
 
     if not settings.youtube_client_secrets_file:
-        print("❌ YouTube client secrets file not configured")
+        print("[FAIL] YouTube client secrets file not configured")
         return False
 
     try:
         uploader = YouTubeUploader()
 
         # Authenticate only
-        print("🔐 Authenticating with YouTube...")
+        print("[INFO] Authenticating with YouTube...")
         await uploader.authenticate()
-        print("✅ YouTube authentication successful!")
-        print("   (No video uploaded - this is just an auth test)")
+        print("[PASS] YouTube authentication successful!")
+        print("       (No video uploaded - this is just an auth test)")
 
         return True
 
     except Exception as e:
-        print(f"❌ YouTube test failed: {e}")
+        print(f"[FAIL] YouTube test failed: {e}")
         return False
 
 
 async def test_all_integrations():
     """Run all integration tests."""
-    print("\n" + "🚀" * 30)
+    print("\n" + "=" * 60)
     print("GreatMan Words Generator - Integration Tests")
-    print("🚀" * 30)
+    print("=" * 60)
 
     results = {}
 
@@ -195,7 +195,7 @@ async def test_all_integrations():
     print("=" * 60)
 
     for service, success in results.items():
-        status = "✅ PASS" if success else "❌ FAIL"
+        status = "[PASS]" if success else "[FAIL]"
         print(f"{service:20s}: {status}")
 
     all_passed = all(results.values())
@@ -203,12 +203,12 @@ async def test_all_integrations():
     print("=" * 60)
 
     if all_passed:
-        print("\n🎉 すべてのテストが成功しました！")
-        print("   すべての連携が正しく設定されています。")
+        print("\n[SUCCESS] All tests passed!")
+        print("          All integrations are configured correctly.")
     else:
-        print("\n⚠️  一部のテストが失敗しました。")
-        print("   失敗したサービスの設定を確認してください。")
-        print("   詳細は docs/integration-setup.md を参照してください。")
+        print("\n[WARNING] Some tests failed.")
+        print("          Check the failed services configuration.")
+        print("          See docs/integration-setup.md for details.")
 
     return all_passed
 
@@ -217,7 +217,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(test_all_integrations())
     except KeyboardInterrupt:
-        print("\n\n⚠️  テストが中断されました")
+        print("\n\n[WARNING] Tests interrupted by user")
     except Exception as e:
         logger.error(f"Test execution failed: {e}")
-        print(f"\n❌ テスト実行エラー: {e}")
+        print(f"\n[ERROR] Test execution error: {e}")

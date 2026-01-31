@@ -1,11 +1,11 @@
 """
 YouTube analytics service for fetching video statistics.
-Uses YouTube Data API v3 to analyze channel performance.
+Uses YouTube Data API v3 and YouTube Analytics API v2.
 """
 
 import os
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from google.auth.transport.requests import Request
@@ -14,6 +14,14 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 from app.config import settings
+from app.models.analytics_models import (
+    CompetitorVideo,
+    DemographicData,
+    DemographicSummary,
+    DeviceData,
+    TrafficSourceData,
+    VideoSubscriberImpact,
+)
 from app.utils.logger import logger
 
 
@@ -63,6 +71,47 @@ class ChannelStats:
         return sorted(self.videos, key=lambda v: v.view_count, reverse=True)[:limit]
 
 
+@dataclass
+class SubscriberGrowth:
+    """日別のチャンネル登録者変動"""
+
+    date: str
+    gained: int
+    lost: int
+
+    @property
+    def net(self) -> int:
+        """純増減"""
+        return self.gained - self.lost
+
+
+@dataclass
+class RetentionData:
+    """動画の視聴維持率データ"""
+
+    video_id: str
+    retention_points: list[dict] = field(default_factory=list)  # [{elapsed_ratio, watch_ratio}]
+
+    @property
+    def average_retention(self) -> float:
+        """平均視聴維持率"""
+        if not self.retention_points:
+            return 0.0
+        return sum(p["watch_ratio"] for p in self.retention_points) / len(
+            self.retention_points
+        )
+
+
+@dataclass
+class VideoCTR:
+    """動画のCTR（クリック率）データ"""
+
+    video_id: str
+    impressions: int
+    ctr: float  # パーセント
+    date: str = ""  # 日別取得時に使用
+
+
 class YouTubeAnalytics:
     """Fetches and analyzes YouTube channel statistics."""
 
@@ -76,6 +125,7 @@ class YouTubeAnalytics:
         self.client_secrets_file = settings.youtube_client_secrets_file
         self.credentials = None
         self.youtube_service = None
+        self.analytics_service = None
 
     async def authenticate(self, token_file: str = "token.json") -> None:
         """
@@ -121,8 +171,11 @@ class YouTubeAnalytics:
                 with open(token_file, "w") as token:
                     token.write(self.credentials.to_json())
 
-            # Build YouTube service
+            # Build YouTube Data API v3 service
             self.youtube_service = build("youtube", "v3", credentials=self.credentials)
+
+            # Build YouTube Analytics API v2 service
+            self._build_analytics_service()
 
             logger.info("YouTube API authentication successful")
 
@@ -374,9 +427,643 @@ class YouTubeAnalytics:
             "common_tags": [{"tag": tag, "count": count} for tag, count in common_tags],
         }
 
-        logger.info(f"Analysis complete: Top {top_n} videos")
-        logger.info(f"  Average views: {avg_views:.0f}")
-        logger.info(f"  Average likes: {avg_likes:.0f}")
-        logger.info(f"  Average engagement: {avg_engagement:.2f}%")
+        logger.info("=" * 60)
+        logger.info(f"[YouTube分析結果] Top {top_n} videos")
+        logger.info(f"  平均再生数: {avg_views:.0f}")
+        logger.info(f"  平均高評価: {avg_likes:.0f}")
+        logger.info(f"  平均エンゲージメント率: {avg_engagement:.2f}%")
+        logger.info("-" * 40)
+        logger.info("[動画パフォーマンス一覧]")
+        for i, v in enumerate(top_videos, 1):
+            logger.info(f"  {i}. {v.title[:40]}...")
+            logger.info(f"     再生数: {v.view_count:,} / 高評価: {v.like_count:,} / エンゲージメント: {v.engagement_rate:.2f}%")
+        logger.info("=" * 60)
 
         return analysis
+
+    # ========================================
+    # YouTube Analytics API v2 メソッド
+    # ========================================
+
+    def _build_analytics_service(self) -> None:
+        """YouTube Analytics API v2サービスを構築"""
+        try:
+            self.analytics_service = build(
+                "youtubeAnalytics", "v2", credentials=self.credentials
+            )
+            logger.info("YouTube Analytics API v2 サービス構築完了")
+        except Exception as e:
+            logger.warning(f"Analytics API v2の構築に失敗（Data API v3は利用可能）: {e}")
+            self.analytics_service = None
+
+    async def _ensure_analytics_service(self) -> None:
+        """Analytics APIサービスが利用可能か確認し、なければ認証"""
+        if not self.analytics_service:
+            await self.authenticate()
+        if not self.analytics_service:
+            raise RuntimeError("YouTube Analytics API v2が利用できません")
+
+    async def get_subscriber_growth(
+        self, days: int = 7
+    ) -> list[SubscriberGrowth]:
+        """
+        チャンネル登録者の日別増減を取得
+
+        Args:
+            days: 取得する日数（デフォルト7日）
+
+        Returns:
+            日別の登録者変動リスト
+        """
+        await self._ensure_analytics_service()
+
+        end_date = datetime.now() - timedelta(days=2)  # データ遅延を考慮
+        start_date = end_date - timedelta(days=days - 1)
+
+        try:
+            response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date.strftime("%Y-%m-%d"),
+                endDate=end_date.strftime("%Y-%m-%d"),
+                metrics="subscribersGained,subscribersLost",
+                dimensions="day",
+                sort="day",
+            ).execute()
+
+            results = []
+            for row in response.get("rows", []):
+                results.append(
+                    SubscriberGrowth(
+                        date=row[0],
+                        gained=int(row[1]),
+                        lost=int(row[2]),
+                    )
+                )
+
+            total_gained = sum(r.gained for r in results)
+            total_lost = sum(r.lost for r in results)
+            logger.info(
+                f"登録者推移（{days}日間）: +{total_gained} / -{total_lost} = 純増{total_gained - total_lost}"
+            )
+
+            return results
+
+        except Exception as e:
+            logger.error(f"登録者推移の取得に失敗: {e}")
+            raise RuntimeError(f"登録者推移の取得に失敗: {e}") from e
+
+    async def get_audience_retention(self, video_id: str) -> RetentionData:
+        """
+        動画の視聴維持率を取得
+
+        Args:
+            video_id: YouTube動画ID
+
+        Returns:
+            視聴維持率データ
+        """
+        await self._ensure_analytics_service()
+
+        try:
+            response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate="2020-01-01",
+                endDate=datetime.now().strftime("%Y-%m-%d"),
+                metrics="audienceWatchRatio",
+                dimensions="elapsedVideoTimeRatio",
+                filters=f"video=={video_id}",
+                sort="elapsedVideoTimeRatio",
+            ).execute()
+
+            points = []
+            for row in response.get("rows", []):
+                points.append(
+                    {
+                        "elapsed_ratio": float(row[0]),
+                        "watch_ratio": float(row[1]),
+                    }
+                )
+
+            retention = RetentionData(video_id=video_id, retention_points=points)
+            logger.info(
+                f"視聴維持率取得: {video_id} - 平均{retention.average_retention:.1f}%"
+            )
+
+            return retention
+
+        except Exception as e:
+            logger.error(f"視聴維持率の取得に失敗 ({video_id}): {e}")
+            raise RuntimeError(f"視聴維持率の取得に失敗: {e}") from e
+
+    async def get_video_ctr(
+        self, video_id: str, start_date: str, end_date: str
+    ) -> list[VideoCTR]:
+        """
+        動画のインプレッション・CTRを日別に取得
+
+        Args:
+            video_id: YouTube動画ID
+            start_date: 開始日 (YYYY-MM-DD)
+            end_date: 終了日 (YYYY-MM-DD)
+
+        Returns:
+            日別のCTRデータリスト
+        """
+        await self._ensure_analytics_service()
+
+        try:
+            response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date,
+                endDate=end_date,
+                metrics="impressions,impressionClickThroughRate",
+                dimensions="day",
+                filters=f"video=={video_id}",
+                sort="day",
+            ).execute()
+
+            results = []
+            for row in response.get("rows", []):
+                results.append(
+                    VideoCTR(
+                        video_id=video_id,
+                        date=row[0],
+                        impressions=int(row[1]),
+                        ctr=float(row[2]),
+                    )
+                )
+
+            if results:
+                total_imp = sum(r.impressions for r in results)
+                avg_ctr = sum(r.ctr for r in results) / len(results)
+                logger.info(
+                    f"CTR取得: {video_id} - {total_imp}インプレッション, 平均CTR {avg_ctr:.2f}%"
+                )
+
+            return results
+
+        except Exception as e:
+            logger.error(f"CTRの取得に失敗 ({video_id}): {e}")
+            raise RuntimeError(f"CTRの取得に失敗: {e}") from e
+
+    async def get_bulk_video_ctr(
+        self, start_date: str, end_date: str
+    ) -> list[VideoCTR]:
+        """
+        全動画のCTRをまとめて取得
+
+        Args:
+            start_date: 開始日 (YYYY-MM-DD)
+            end_date: 終了日 (YYYY-MM-DD)
+
+        Returns:
+            動画別のCTRデータリスト
+        """
+        await self._ensure_analytics_service()
+
+        try:
+            response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date,
+                endDate=end_date,
+                metrics="impressions,impressionClickThroughRate",
+                dimensions="video",
+                sort="-impressions",
+            ).execute()
+
+            results = []
+            for row in response.get("rows", []):
+                results.append(
+                    VideoCTR(
+                        video_id=row[0],
+                        impressions=int(row[1]),
+                        ctr=float(row[2]),
+                    )
+                )
+
+            logger.info(f"全動画CTR取得: {len(results)}件")
+            return results
+
+        except Exception as e:
+            logger.error(f"全動画CTRの取得に失敗: {e}")
+            raise RuntimeError(f"全動画CTRの取得に失敗: {e}") from e
+
+    async def detect_trending_videos(
+        self, days: int = 7, growth_threshold: float = 1.5
+    ) -> list[dict]:
+        """
+        伸びている動画を検出（前期間比で視聴回数増加率が閾値以上）
+
+        Args:
+            days: 比較期間（日数）
+            growth_threshold: 成長率の閾値（1.5 = 前期間の1.5倍以上）
+
+        Returns:
+            伸びている動画のリスト [{video_id, title, current_views, previous_views, growth_rate}]
+        """
+        await self._ensure_analytics_service()
+
+        end_date = datetime.now() - timedelta(days=2)
+        mid_date = end_date - timedelta(days=days)
+        start_date = mid_date - timedelta(days=days)
+
+        try:
+            # 今期間の視聴回数
+            current_response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate=mid_date.strftime("%Y-%m-%d"),
+                endDate=end_date.strftime("%Y-%m-%d"),
+                metrics="views",
+                dimensions="video",
+                sort="-views",
+                maxResults=50,
+            ).execute()
+
+            current_views: dict[str, int] = {}
+            for row in current_response.get("rows", []):
+                current_views[row[0]] = int(row[1])
+
+            # 前期間の視聴回数
+            previous_response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date.strftime("%Y-%m-%d"),
+                endDate=mid_date.strftime("%Y-%m-%d"),
+                metrics="views",
+                dimensions="video",
+                sort="-views",
+                maxResults=50,
+            ).execute()
+
+            previous_views: dict[str, int] = {}
+            for row in previous_response.get("rows", []):
+                previous_views[row[0]] = int(row[1])
+
+            # 成長率を計算
+            trending = []
+            for video_id, curr in current_views.items():
+                prev = previous_views.get(video_id, 0)
+                if prev > 0:
+                    growth_rate = curr / prev
+                elif curr > 0:
+                    growth_rate = float("inf")
+                else:
+                    continue
+
+                if growth_rate >= growth_threshold:
+                    trending.append(
+                        {
+                            "video_id": video_id,
+                            "current_views": curr,
+                            "previous_views": prev,
+                            "growth_rate": growth_rate,
+                        }
+                    )
+
+            # タイトルを取得
+            if trending and self.youtube_service:
+                video_ids = [t["video_id"] for t in trending]
+                stats = await self.get_video_stats(video_ids)
+                title_map = {s.video_id: s.title for s in stats}
+                for t in trending:
+                    t["title"] = title_map.get(t["video_id"], "不明")
+
+            trending.sort(key=lambda x: x["growth_rate"], reverse=True)
+
+            logger.info(f"注目動画検出: {len(trending)}件（成長率{growth_threshold}倍以上）")
+            for t in trending[:5]:
+                logger.info(
+                    f"  {t.get('title', t['video_id'])[:30]} - "
+                    f"成長率{t['growth_rate']:.1f}倍 ({t['previous_views']}→{t['current_views']})"
+                )
+
+            return trending
+
+        except Exception as e:
+            logger.error(f"注目動画の検出に失敗: {e}")
+            raise RuntimeError(f"注目動画の検出に失敗: {e}") from e
+
+    # ========================================
+    # 包括的チャンネル分析メソッド (Phase 1)
+    # ========================================
+
+    async def get_traffic_sources(
+        self, start_date: str, end_date: str
+    ) -> list[TrafficSourceData]:
+        """
+        トラフィックソース別の視聴データを取得
+
+        Args:
+            start_date: 開始日 (YYYY-MM-DD)
+            end_date: 終了日 (YYYY-MM-DD)
+
+        Returns:
+            トラフィックソース別データのリスト
+        """
+        await self._ensure_analytics_service()
+
+        try:
+            response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date,
+                endDate=end_date,
+                metrics="views,estimatedMinutesWatched",
+                dimensions="insightTrafficSourceType",
+                sort="-views",
+            ).execute()
+
+            total_views = sum(int(row[1]) for row in response.get("rows", []))
+            results = []
+            for row in response.get("rows", []):
+                views = int(row[1])
+                results.append(
+                    TrafficSourceData(
+                        source_type=row[0],
+                        views=views,
+                        watch_time_minutes=float(row[2]),
+                        percentage=round(views / total_views * 100, 1) if total_views else 0,
+                    )
+                )
+
+            logger.info(f"トラフィックソース取得: {len(results)}種類")
+            for r in results[:5]:
+                logger.info(f"  {r.source_type}: {r.views:,} views ({r.percentage}%)")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"トラフィックソースの取得に失敗: {e}")
+            raise RuntimeError(f"トラフィックソースの取得に失敗: {e}") from e
+
+    async def get_demographics(
+        self, start_date: str, end_date: str
+    ) -> DemographicSummary:
+        """
+        年齢・性別別の視聴者データを取得
+
+        Args:
+            start_date: 開始日 (YYYY-MM-DD)
+            end_date: 終了日 (YYYY-MM-DD)
+
+        Returns:
+            デモグラフィックサマリー
+        """
+        await self._ensure_analytics_service()
+
+        try:
+            response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date,
+                endDate=end_date,
+                metrics="viewerPercentage",
+                dimensions="ageGroup,gender",
+                sort="-viewerPercentage",
+            ).execute()
+
+            details = []
+            for row in response.get("rows", []):
+                details.append(
+                    DemographicData(
+                        age_group=row[0],
+                        gender=row[1],
+                        views=0,  # viewerPercentageは割合なのでviews=0
+                        percentage=float(row[2]),
+                    )
+                )
+
+            summary = DemographicSummary(details=details)
+            logger.info(f"デモグラフィック取得: {len(details)}セグメント")
+            logger.info(f"  主要年齢層: {summary.top_age_group}")
+
+            return summary
+
+        except Exception as e:
+            logger.error(f"デモグラフィックの取得に失敗: {e}")
+            raise RuntimeError(f"デモグラフィックの取得に失敗: {e}") from e
+
+    async def get_device_breakdown(
+        self, start_date: str, end_date: str
+    ) -> list[DeviceData]:
+        """
+        デバイス別の視聴データを取得
+
+        Args:
+            start_date: 開始日 (YYYY-MM-DD)
+            end_date: 終了日 (YYYY-MM-DD)
+
+        Returns:
+            デバイス別データのリスト
+        """
+        await self._ensure_analytics_service()
+
+        try:
+            response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date,
+                endDate=end_date,
+                metrics="views,estimatedMinutesWatched",
+                dimensions="deviceType",
+                sort="-views",
+            ).execute()
+
+            total_views = sum(int(row[1]) for row in response.get("rows", []))
+            results = []
+            for row in response.get("rows", []):
+                views = int(row[1])
+                results.append(
+                    DeviceData(
+                        device_type=row[0],
+                        views=views,
+                        watch_time_minutes=float(row[2]),
+                        percentage=round(views / total_views * 100, 1) if total_views else 0,
+                    )
+                )
+
+            logger.info(f"デバイス別取得: {len(results)}種類")
+            for r in results[:3]:
+                logger.info(f"  {r.device_type}: {r.views:,} views ({r.percentage}%)")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"デバイス別データの取得に失敗: {e}")
+            raise RuntimeError(f"デバイス別データの取得に失敗: {e}") from e
+
+    async def get_video_subscriber_impact(
+        self, start_date: str, end_date: str
+    ) -> list[VideoSubscriberImpact]:
+        """
+        動画ごとの登録者獲得・離脱データを取得
+
+        Args:
+            start_date: 開始日 (YYYY-MM-DD)
+            end_date: 終了日 (YYYY-MM-DD)
+
+        Returns:
+            動画ごとの登録者影響データリスト
+        """
+        await self._ensure_analytics_service()
+
+        try:
+            response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date,
+                endDate=end_date,
+                metrics="subscribersGained,subscribersLost,views,estimatedMinutesWatched",
+                dimensions="video",
+                sort="-subscribersGained",
+                maxResults=50,
+            ).execute()
+
+            results = []
+            for row in response.get("rows", []):
+                results.append(
+                    VideoSubscriberImpact(
+                        video_id=row[0],
+                        title="",  # タイトルは後で付与
+                        subscribers_gained=int(row[1]),
+                        subscribers_lost=int(row[2]),
+                        views=int(row[3]),
+                        estimated_minutes_watched=float(row[4]),
+                    )
+                )
+
+            # Data API v3でタイトルを取得
+            if results and self.youtube_service:
+                video_ids = [r.video_id for r in results]
+                stats = await self.get_video_stats(video_ids)
+                title_map = {s.video_id: s.title for s in stats}
+                for r in results:
+                    r.title = title_map.get(r.video_id, "不明")
+
+            logger.info(f"動画別登録者影響取得: {len(results)}件")
+            for r in results[:5]:
+                logger.info(
+                    f"  {r.title[:30]}: +{r.subscribers_gained}/-{r.subscribers_lost} "
+                    f"(純増{r.net_subscribers})"
+                )
+
+            return results
+
+        except Exception as e:
+            logger.error(f"動画別登録者影響の取得に失敗: {e}")
+            raise RuntimeError(f"動画別登録者影響の取得に失敗: {e}") from e
+
+    async def get_daily_views_for_video(
+        self, video_id: str, start_date: str, end_date: str
+    ) -> list[dict]:
+        """
+        動画の日別再生数を取得（初動分析用）
+
+        Args:
+            video_id: YouTube動画ID
+            start_date: 開始日 (YYYY-MM-DD)
+            end_date: 終了日 (YYYY-MM-DD)
+
+        Returns:
+            日別再生数のリスト [{date, views}]
+        """
+        await self._ensure_analytics_service()
+
+        try:
+            response = self.analytics_service.reports().query(
+                ids="channel==MINE",
+                startDate=start_date,
+                endDate=end_date,
+                metrics="views",
+                dimensions="day",
+                filters=f"video=={video_id}",
+                sort="day",
+            ).execute()
+
+            results = []
+            for row in response.get("rows", []):
+                results.append({"date": row[0], "views": int(row[1])})
+
+            total = sum(r["views"] for r in results)
+            logger.info(f"日別再生数取得: {video_id} - {len(results)}日分, 合計{total}再生")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"日別再生数の取得に失敗 ({video_id}): {e}")
+            raise RuntimeError(f"日別再生数の取得に失敗: {e}") from e
+
+    async def search_niche_videos(
+        self,
+        query: str,
+        max_results: int = 25,
+        order: str = "viewCount",
+        published_after: str | None = None,
+    ) -> list[CompetitorVideo]:
+        """
+        YouTube Data API v3のsearch.listで競合動画を検索
+
+        Args:
+            query: 検索クエリ
+            max_results: 最大取得件数
+            order: ソート順 (viewCount, date, relevance)
+            published_after: この日付以降の動画のみ (ISO 8601形式)
+
+        Returns:
+            競合動画のリスト
+        """
+        if not self.youtube_service:
+            await self.authenticate()
+
+        try:
+            search_params: dict = {
+                "part": "id,snippet",
+                "q": query,
+                "type": "video",
+                "maxResults": min(max_results, 50),
+                "order": order,
+                "relevanceLanguage": "ja",
+                "regionCode": "JP",
+            }
+
+            if published_after:
+                search_params["publishedAfter"] = published_after
+
+            response = self.youtube_service.search().list(**search_params).execute()
+
+            video_ids = [item["id"]["videoId"] for item in response.get("items", [])]
+            if not video_ids:
+                logger.info(f"検索結果なし: {query}")
+                return []
+
+            # 詳細統計を取得
+            detail_response = self.youtube_service.videos().list(
+                part="snippet,statistics,contentDetails",
+                id=",".join(video_ids),
+            ).execute()
+
+            results = []
+            for item in detail_response.get("items", []):
+                snippet = item["snippet"]
+                stats = item.get("statistics", {})
+                results.append(
+                    CompetitorVideo(
+                        video_id=item["id"],
+                        title=snippet["title"],
+                        channel_title=snippet["channelTitle"],
+                        channel_id=snippet["channelId"],
+                        view_count=int(stats.get("viewCount", 0)),
+                        like_count=int(stats.get("likeCount", 0)),
+                        published_at=snippet["publishedAt"],
+                        duration=item["contentDetails"]["duration"],
+                        tags=snippet.get("tags", []),
+                        description=snippet.get("description", "")[:200],
+                    )
+                )
+
+            logger.info(f"競合検索: '{query}' → {len(results)}件")
+            for r in results[:3]:
+                logger.info(
+                    f"  [{r.channel_title}] {r.title[:40]} - {r.view_count:,} views"
+                )
+
+            return results
+
+        except Exception as e:
+            logger.error(f"競合動画検索に失敗 ({query}): {e}")
+            raise RuntimeError(f"競合動画検索に失敗: {e}") from e

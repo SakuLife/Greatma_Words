@@ -8,12 +8,22 @@ from __future__ import annotations
 import math
 import re
 
+import google.generativeai as genai
+
+from app.config import settings
 from app.models.schemas import VideoScript
 from app.utils.logger import logger
 
 
 class DescriptionGenerator:
     """Generates YouTube video descriptions from script content."""
+
+    def __init__(self):
+        """Initialize description generator with AI client."""
+        self.gemini_enabled = False
+        if settings.gemini_api_key:
+            genai.configure(api_key=settings.gemini_api_key)
+            self.gemini_enabled = True
 
     def generate_description(
         self,
@@ -22,14 +32,15 @@ class DescriptionGenerator:
         topic: str,
         video_duration_seconds: float,
         subtitles: list[dict] | None = None,
+        dynamic_hashtags: list[str] | None = None,
     ) -> str:
         logger.info("Generating video description")
 
-        opening_hook = self._extract_opening_hook(script)
+        opening_hook = self._generate_opening_hook(person_name, topic, script)
         summary = self._generate_summary(person_name, topic, script, video_duration_seconds)
         chapters = self._generate_chapters(script, video_duration_seconds, subtitles)
         narration_info = "■ナレーション\nVOICEVOX：青山龍星"
-        hashtags = self._generate_hashtags(person_name, topic)
+        hashtags = self._generate_hashtags(person_name, topic, dynamic_hashtags)
 
         description = (
             f"{opening_hook}\n\n"
@@ -42,15 +53,54 @@ class DescriptionGenerator:
         logger.debug("Description generated")
         return description
 
-    def _extract_opening_hook(self, script: VideoScript) -> str:
-        """Grab the first 1-3 sentences from the opening section."""
-        if not script.sections:
-            return "この動画では、偉人の思想から現代に活かせるヒントを解説します。"
+    def _generate_opening_hook(
+        self, person_name: str, topic: str, script: VideoScript
+    ) -> str:
+        """
+        AIで動画説明文用の冒頭フックを生成する。
+        台本をそのまま使わず、YouTube説明文に適した短いキャッチコピーを生成。
+        """
+        if not self.gemini_enabled:
+            # フォールバック: シンプルなテンプレート
+            return f"なぜ{person_name}は成功できたのか？その秘密に迫ります。"
 
-        narration = script.sections[0].narration
-        sentences = [s.strip() for s in re.split(r"(?<=。)", narration) if s.strip()]
-        hook = " ".join(sentences[:3]) if sentences else narration.strip()
-        return hook
+        try:
+            # 台本の要点を抽出
+            key_points = []
+            for section in script.sections[:3]:  # 最初の3セクションから
+                if section.title:
+                    key_points.append(section.title)
+
+            prompt = f"""YouTube動画の説明文の冒頭に使う、短くてキャッチーなフック文を1つだけ生成してください。
+
+【動画情報】
+- 人物: {person_name}
+- テーマ: {topic}
+- 主な内容: {', '.join(key_points) if key_points else 'この人物の哲学と教訓'}
+
+【条件】
+- 2-3文で、合計50-80文字程度
+- 視聴者の興味を引く問いかけや気づきを含める
+- 台本調ではなく、説明文として自然な文体
+- 「この動画では」のような説明的な書き出しは避ける
+- 絵文字は使わない
+
+フック文のみを出力してください。"""
+
+            model = genai.GenerativeModel("gemini-2.0-flash")
+            response = model.generate_content(prompt)
+            hook = response.text.strip()
+
+            # 改行があれば最初の段落だけ使用
+            if "\n" in hook:
+                hook = hook.split("\n")[0].strip()
+
+            logger.info(f"✅ AIで冒頭フックを生成: {hook[:50]}...")
+            return hook
+
+        except Exception as e:
+            logger.warning(f"⚠️ AI冒頭フック生成に失敗、フォールバック使用: {e}")
+            return f"なぜ{person_name}は成功できたのか？その秘密に迫ります。"
 
     def _generate_summary(
         self,
@@ -118,7 +168,23 @@ class DescriptionGenerator:
 
         return "\n".join(chapters)
 
-    def _generate_hashtags(self, person_name: str, topic: str) -> str:
+    def _generate_hashtags(
+        self,
+        person_name: str,
+        topic: str,
+        dynamic_hashtags: list[str] | None = None,
+    ) -> str:
+        """
+        ハッシュタグを生成。動的ハッシュタグが提供されていればそちらを優先使用。
+
+        Args:
+            person_name: 人物名
+            topic: テーマ
+            dynamic_hashtags: 戦略エンジンが生成した動的ハッシュタグ
+        """
+        if dynamic_hashtags:
+            return " ".join(dynamic_hashtags)
+
         tags = [
             f"#{person_name}",
             f"#{topic}",

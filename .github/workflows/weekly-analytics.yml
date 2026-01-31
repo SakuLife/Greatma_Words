@@ -1,27 +1,22 @@
-name: Auto Generate Data-Driven Video
+name: Weekly YouTube Analytics & A/B Test
 
 on:
   schedule:
-    # 毎朝10時（JST）= UTC 1:00
-    - cron: '0 1 * * *'
-    # 毎晩19時（JST）= UTC 10:00
-    - cron: '0 10 * * *'
+    # 毎週月曜 09:00 JST = 日曜 24:00 UTC = 月曜 00:00 UTC
+    - cron: '0 0 * * 1'
   workflow_dispatch:
     inputs:
-      duration_minutes:
-        description: "Target video length in minutes (>=5)"
+      mode:
+        description: "Run mode: analytics, ab-test, deep-analysis, strategy, or all"
         required: false
-        default: "15"
+        default: "all"
 
 jobs:
-  generate:
-    # GitHub-hosted runner - runs on GitHub's servers, no local PC needed
-    # Docker is pre-installed, VOICEVOX will start automatically
+  analytics:
     runs-on: ubuntu-latest
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
-      DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || '15' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,19 +27,8 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install system dependencies (fonts)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
-
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
-
-      - name: Check Docker availability
-        run: |
-          echo "Checking Docker..."
-          docker --version
-          docker compose version
 
       - name: Write client_secrets.json
         continue-on-error: true
@@ -56,25 +40,23 @@ jobs:
             fi
           fi
 
-      - name: Write token.json (optional, YouTube refresh token)
+      - name: Write token.json (YouTube OAuth token)
         continue-on-error: true
         run: |
           if [ -n "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" ]; then
             printf '%s' "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > token.json || echo "Failed to decode token.json, skipping..."
             if [ -f token.json ]; then
               echo "token.json size: $(wc -c < token.json) bytes"
-              head -c 100 token.json && echo ""  # 最初の100文字を表示（デバッグ用）
             fi
           fi
 
-      - name: Write Google token (optional, Drive/Sheets refresh token)
+      - name: Write Google token (Drive/Sheets OAuth token)
         continue-on-error: true
         run: |
           if [ -n "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" ]; then
             printf '%s' "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > google_token.json || echo "Failed to decode google_token, skipping..."
             if [ -f google_token.json ]; then
               echo "google_token.json size: $(wc -c < google_token.json) bytes"
-              # DriveManager と SheetsManager 用にもコピー
               cp google_token.json drive_token.json
               cp google_token.json sheets_token.json
               echo "Copied to drive_token.json and sheets_token.json"
@@ -98,14 +80,8 @@ jobs:
           THUMBNAIL_PROVIDER=nanobanana
           NANOBANANA_API_KEY=${{ secrets.KIEAI_API_KEY }}
           NANOBANANA_API_URL=https://api.kie.ai/api/v1
-          VOICEVOX_API_URL=http://localhost:50021
-          VOICEVOX_SPEAKER_ID=13
           YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
           YOUTUBE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/yt-analytics.readonly
-          AB_TEST_ENABLED=${{ vars.AB_TEST_ENABLED || 'false' }}
-          AB_TEST_ROTATION_DAYS=7
-          AB_TEST_MIN_IMPRESSIONS=100
-          AB_TEST_MIN_CTR_DIFF=0.5
           YOUTUBE_DEFAULT_CATEGORY=22
           YOUTUBE_DEFAULT_PRIVACY=private
           GOOGLE_CLIENT_SECRETS_FILE=client_secrets.json
@@ -115,51 +91,16 @@ jobs:
           DATA_DIR=./data
           PROJECTS_DIR=./data/projects
           TEMPLATES_DIR=./data/templates
-          DEFAULT_LLM_MODEL=models/gemini-pro-latest
-          DEFAULT_SCRIPT_LENGTH=15
-          DEFAULT_TEMPERATURE=0.7
+          AB_TEST_ENABLED=${{ vars.AB_TEST_ENABLED || 'false' }}
+          AB_TEST_ROTATION_DAYS=7
+          AB_TEST_MIN_IMPRESSIONS=100
+          AB_TEST_MIN_CTR_DIFF=0.5
           EOF
-          # Remove leading spaces from .env file
           sed -i 's/^[[:space:]]*//' .env
 
-      - name: Start VOICEVOX with Docker
-        run: |
-          # Start VOICEVOX with Docker Compose
-          docker compose up -d voicevox
+      - name: Run weekly analytics (basic)
+        run: python run_weekly_analytics.py ${{ github.event.inputs.mode || 'all' }}
 
-          # Wait for API to be ready (max 60 seconds)
-          echo "Waiting for VOICEVOX API to be ready..."
-          for i in {1..30}; do
-            sleep 2
-            if curl -s http://localhost:50021/version > /dev/null 2>&1; then
-              echo "VOICEVOX API is ready!"
-              exit 0
-            fi
-            echo "Attempt $i/30 - Waiting for API..."
-          done
-          echo "VOICEVOX API did not become ready within 60 seconds"
-          exit 1
-
-      - name: Run data-driven generation
-        env:
-          PYTHONUTF8: "1"
-          PYTHONIOENCODING: "utf-8"
-        run: |
-          # Use auto mode - AI analyzes YouTube data and suggests person/topic
-          # Format: python generate_data_driven_video.py auto duration
-          python generate_data_driven_video.py auto ${{ env.DURATION_MINUTES }}
-
-      - name: Upload artifacts (video & assets)
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-video
-          path: |
-            data/projects/*/video/*.mp4
-            data/projects/*/images/*
-            data/projects/*/metadata.json
-          if-no-files-found: warn
-
-      - name: Stop VOICEVOX
-        if: always()
-        run: |
-          docker compose down
+      - name: Run deep analysis & strategy
+        if: github.event.inputs.mode == 'deep-analysis' || github.event.inputs.mode == 'strategy' || github.event.inputs.mode == 'all' || github.event.inputs.mode == ''
+        run: python run_deep_analytics.py ${{ github.event.inputs.mode == 'deep-analysis' && 'analysis' || github.event.inputs.mode == 'strategy' && 'strategy' || 'all' }}

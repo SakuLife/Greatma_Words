@@ -50,6 +50,7 @@ class ScriptGenerator:
         model: str | None = None,
         temperature: float | None = None,
         additional_context: str | None = None,
+        full_prompt_override: str | None = None,
     ) -> VideoScript:
         """
         Generate a video script using LLM API.
@@ -61,6 +62,7 @@ class ScriptGenerator:
             model: LLM model to use (defaults to config setting)
             temperature: Temperature for generation (defaults to config setting)
             additional_context: Additional context for script generation (e.g., channel analytics)
+            full_prompt_override: 動的プロンプトで完全にオーバーライドする場合に使用
 
         Returns:
             Generated VideoScript instance
@@ -77,8 +79,14 @@ class ScriptGenerator:
             f"duration={duration_minutes}min, model={model}"
         )
 
-        # Prepare prompt
-        prompt = self._prepare_prompt(topic, person_name, duration_minutes, additional_context)
+        # Prepare prompt（動的プロンプトが指定されていればそちらを使用）
+        if full_prompt_override:
+            prompt = full_prompt_override
+            if additional_context:
+                prompt = f"{additional_context}\n\n{prompt}"
+            logger.info("動的プロンプトを使用")
+        else:
+            prompt = self._prepare_prompt(topic, person_name, duration_minutes, additional_context)
 
         # Generate using appropriate API
         if "gpt" in model.lower():
@@ -101,6 +109,20 @@ class ScriptGenerator:
             script_data = json.loads(script_json)
             script = VideoScript(**script_data)
             logger.info(f"Successfully generated script with {len(script.sections)} sections")
+
+            # 台本の内容をログに出力
+            logger.info("=" * 60)
+            logger.info("[台本内容]")
+            for i, section in enumerate(script.sections, 1):
+                logger.info(f"  セクション{i}: {section.title}")
+                # ナレーションの最初の100文字を表示
+                narration_preview = section.narration[:100] + "..." if len(section.narration) > 100 else section.narration
+                logger.info(f"    内容: {narration_preview}")
+                logger.info(f"    長さ: {section.duration_seconds}秒")
+            total_duration = sum(s.duration_seconds for s in script.sections)
+            logger.info(f"  合計時間: {total_duration}秒 ({total_duration/60:.1f}分)")
+            logger.info("=" * 60)
+
             return script
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Failed to parse script: {e}")

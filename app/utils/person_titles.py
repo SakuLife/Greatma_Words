@@ -2,6 +2,8 @@
 Person titles and affiliations for thumbnail generation.
 """
 
+from app.utils.logger import logger
+
 # 人物名から肩書を取得する辞書
 PERSON_TITLES = {
     "ウォーレン・バフェット": "バークシャー・ハサウェイCEO・世界一の投資家",
@@ -90,4 +92,23 @@ def get_person_quote(person_name: str) -> str:
         Famous quote string, or empty string if not found
     """
     return PERSON_QUOTES.get(person_name, "")
+
+
+def register_person_info(person_name: str, title: str | None = None, quote: str | None = None) -> None:
+    """
+    動的に人物情報を辞書に登録する。
+    AIが取得した肩書・名言を画像生成前に登録するために使用。
+
+    Args:
+        person_name: 人物名
+        title: 肩書（Noneまたは空文字の場合はスキップ）
+        quote: 名言（Noneまたは空文字の場合はスキップ）
+    """
+    if title:
+        PERSON_TITLES[person_name] = title
+        logger.info(f"[INFO] 肩書を登録しました: {person_name} -> {title}")
+
+    if quote:
+        PERSON_QUOTES[person_name] = quote
+        logger.info(f"[INFO] 名言を登録しました: {person_name} -> {quote}")
 

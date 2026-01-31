@@ -14,7 +14,9 @@ from app.services.data_driven_workflow import DataDrivenWorkflow
 from app.services.discord_notifier import DiscordNotifier
 from app.services.drive_manager import DriveManager
 from app.services.sheets_manager import SheetsManager
+from app.services.upload_time_optimizer import UploadTimeOptimizer
 from app.utils.logger import logger
+from app.utils.person_titles import register_person_info
 from pydub import AudioSegment
 
 
@@ -28,6 +30,7 @@ async def generate_data_driven_video(
     log_to_sheets: bool = True,
     send_discord_notifications: bool = True,
     youtube_privacy: str = "private",
+    use_optimal_publish_time: bool = False,
 ):
     """
     Generate video using data-driven approach.
@@ -109,6 +112,13 @@ async def generate_data_driven_video(
 
         logger.info(f"台本生成完了: {len(script.sections)}セクション")
 
+        # AIが取得した肩書・名言を登録（画像生成時に使用される）
+        person_title = suggestion.get("person_title", "")
+        famous_quote = suggestion.get("famous_quote", "")
+        if person_title or famous_quote:
+            register_person_info(person_name, title=person_title, quote=famous_quote)
+            logger.info(f"✅ 人物情報を登録しました（画像生成用）")
+
         # Step 2: Generate complete video using existing orchestrator
         logger.info("=" * 60)
         logger.info("Step 2: 動画生成開始")
@@ -118,6 +128,17 @@ async def generate_data_driven_video(
             await discord.notify_task_progress(
                 "動画生成", 3, 8, "画像・音声・動画を生成中..."
             )
+
+        # 最適投稿時間の取得（有効な場合）
+        publish_at = None
+        if use_optimal_publish_time and youtube_privacy in ("public", "unlisted"):
+            try:
+                optimizer = UploadTimeOptimizer()
+                publish_at = await optimizer.get_optimal_publish_datetime()
+                if publish_at:
+                    logger.info(f"予約公開設定: {publish_at.isoformat()}")
+            except Exception as e:
+                logger.warning(f"最適投稿時間の取得に失敗（即時公開）: {e}")
 
         config = GenerationConfig(
             topic=topic,
@@ -155,12 +176,36 @@ async def generate_data_driven_video(
                 except Exception as e:
                     logger.warning(f"Discord notification failed (YouTube): {e}")
 
-        # Step 3: Upload to Google Drive
+        # Step 3: Register A/B test (if enabled)
+        if (
+            settings.ab_test_enabled
+            and project.youtube_video_id
+            and project.thumbnail_path
+            and project.thumbnail_path.exists()
+        ):
+            try:
+                from app.services.thumbnail_ab_test_manager import (
+                    ThumbnailABTestManager,
+                )
+
+                ab_manager = ThumbnailABTestManager()
+                await ab_manager.register_new_test(
+                    video_id=project.youtube_video_id,
+                    video_title=f"{person_name} - {topic}",
+                    person_name=person_name,
+                    topic=topic,
+                    original_thumbnail_path=project.thumbnail_path,
+                )
+                logger.info("A/Bテストを登録しました")
+            except Exception as e:
+                logger.warning(f"A/Bテスト登録に失敗（動画生成には影響なし）: {e}")
+
+        # Step 4: Upload to Google Drive
         drive_url = None
         if upload_to_drive and drive:
             try:
                 logger.info("=" * 60)
-                logger.info("Step 3: Google Driveアップロード")
+                logger.info("Step 4: Google Driveアップロード")
                 logger.info("=" * 60)
 
                 if discord:
@@ -191,11 +236,11 @@ async def generate_data_driven_video(
                 logger.error(f"Google Drive upload failed: {e}")
                 # Continue even if Drive upload fails
 
-        # Step 4: Log to Google Sheets
+        # Step 5: Log to Google Sheets
         if log_to_sheets and sheets:
             try:
                 logger.info("=" * 60)
-                logger.info("Step 4: Google Sheetsログ記録")
+                logger.info("Step 5: Google Sheetsログ記録")
                 logger.info("=" * 60)
 
                 if discord:
@@ -224,12 +269,16 @@ async def generate_data_driven_video(
                 )
 
                 if success:
-                    logger.info("Sheetsログ記録完了")
+                    logger.info("✅ Sheetsログ記録完了")
+                else:
+                    logger.error("❌ Sheetsログ記録に失敗しました（詳細は上のログを確認）")
             except Exception as e:
-                logger.error(f"Google Sheets logging failed: {e}")
+                logger.error(f"❌ Google Sheets logging failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 # Continue even if Sheets logging fails
 
-        # Step 5: Send completion notification
+        # Step 6: Send completion notification
         total_time = time.time() - start_time
 
         if discord:

@@ -46,6 +46,67 @@ class VideoCreator:
         """Initialize video creator."""
         self.fps = settings.video_fps
         self.resolution = (settings.video_width, settings.video_height)
+        self._subtitle_font_cache = None  # フォントキャッシュ
+
+    def _get_subtitle_font(self):
+        """字幕用フォントを取得（キャッシュ使用）"""
+        if self._subtitle_font_cache is not None:
+            return self._subtitle_font_cache
+
+        import platform
+        import os
+
+        font_size = 52
+        font = None
+
+        if platform.system() == "Windows":
+            font_candidates = [
+                "C:/Windows/Fonts/meiryob.ttc",
+                "C:/Windows/Fonts/YuGothB.ttc",
+                "C:/Windows/Fonts/msgothic.ttc",
+                "C:/Windows/Fonts/meiryo.ttc",
+            ]
+            for fp in font_candidates:
+                if os.path.exists(fp):
+                    try:
+                        font = ImageFont.truetype(fp, font_size)
+                        logger.info(f"[INFO] 字幕用フォント: {fp}")
+                        break
+                    except (OSError, IOError):
+                        continue
+        elif platform.system() == "Darwin":
+            font_candidates = [
+                "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
+                "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc",
+            ]
+            for fp in font_candidates:
+                if os.path.exists(fp):
+                    try:
+                        font = ImageFont.truetype(fp, font_size)
+                        logger.info(f"[INFO] 字幕用フォント: {fp}")
+                        break
+                    except (OSError, IOError):
+                        continue
+        else:  # Linux
+            font_candidates = [
+                ("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 0),
+                ("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc", 0),
+            ]
+            for fp, index in font_candidates:
+                if os.path.exists(fp):
+                    try:
+                        font = ImageFont.truetype(fp, font_size, index=index)
+                        logger.info(f"[INFO] 字幕用フォント: {fp}")
+                        break
+                    except (OSError, IOError):
+                        continue
+
+        if font is None:
+            logger.warning("字幕用日本語フォントが見つかりません")
+            font = ImageFont.load_default()
+
+        self._subtitle_font_cache = font
+        return font
 
     def _smart_line_break(self, text: str, max_chars: int = 30) -> list[str]:
         """
@@ -185,62 +246,11 @@ class VideoCreator:
             # Write video file
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            logger.info(f"[INFO] 動画ファイルを書き出し中... (これには時間がかかります)")
-            logger.info(f"  出力先: {output_path}")
-            logger.info(f"  動画の長さ: {duration:.1f}秒 ({duration/60:.1f}分)")
-            logger.info(f"  進捗状況を表示します...")
-
-            # カスタムロガーで進捗を表示
-            class ProgressLogger:
-                """ffmpegの出力をパースして進捗を表示するロガー"""
-                def __init__(self, total_duration: float):
-                    self.total_duration = total_duration
-                    self.last_progress = 0
-                    # ffmpegの出力パターン: time=HH:MM:SS.mm または time=00:00:12.34
-                    self.time_pattern = re.compile(r'time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})')
-                    self.start_time = None
-
-                def message(self, msg: str):
-                    """ffmpegの出力メッセージを処理"""
-                    # time=HH:MM:SS.mm の形式を探す
-                    match = self.time_pattern.search(msg)
-                    if match:
-                        hours, minutes, seconds, centiseconds = map(int, match.groups())
-                        current_time = hours * 3600 + minutes * 60 + seconds + centiseconds / 100.0
-
-                        if self.total_duration > 0:
-                            progress = min(100, (current_time / self.total_duration) * 100)
-                            # 5%ごとに表示（最後の10%は1%ごと）
-                            should_log = False
-                            if progress >= 90:
-                                # 最後の10%は1%ごと
-                                should_log = progress >= self.last_progress + 1
-                            else:
-                                # それ以外は5%ごと
-                                should_log = progress >= self.last_progress + 5
-
-                            if should_log:
-                                elapsed_min = current_time / 60.0
-                                total_min = self.total_duration / 60.0
-                                remaining_min = max(0, (total_min - elapsed_min))
-                                logger.info(
-                                    f"[進捗] {progress:.1f}% "
-                                    f"({elapsed_min:.1f}分 / {total_min:.1f}分) "
-                                    f"残り約{remaining_min:.1f}分"
-                                )
-                                self.last_progress = int(progress)
-
-                def error(self, msg: str):
-                    """エラーメッセージを処理（無視）"""
-                    pass
+            logger.info(f"[INFO] 動画ファイルを書き出し中: {output_path}")
 
             # 開始時刻を記録
             import time
             start_time = time.time()
-
-            # 進捗表示は一旦無効化（MoviePyのlogger要件が複雑なため）
-            # 動画生成には時間がかかりますが、完了までお待ちください
-            logger.info("[INFO] 動画書き出しには数分かかります。完了までお待ちください...")
 
             video_clip.write_videofile(
                 str(output_path),
@@ -402,68 +412,8 @@ class VideoCreator:
         img = Image.new("RGBA", (subtitle_width, subtitle_height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        # フォントを読み込む
-        import platform
-        import os
-        font_size = 52  # 動的字幕のフォントサイズ
-        font = None
-
-        if platform.system() == "Windows":
-            # 日本語フォント候補（太字を優先）
-            font_candidates = [
-                "C:/Windows/Fonts/meiryob.ttc",  # メイリオ Bold（太字優先）
-                "C:/Windows/Fonts/YuGothB.ttc",  # 游ゴシック Bold
-                "C:/Windows/Fonts/msgothic.ttc",  # MSゴシック
-                "C:/Windows/Fonts/meiryo.ttc",  # メイリオ
-                "C:/Windows/Fonts/YuGothM.ttc",  # 游ゴシック Medium
-            ]
-            for fp in font_candidates:
-                if os.path.exists(fp):
-                    try:
-                        font = ImageFont.truetype(fp, font_size)
-                        logger.debug(f"字幕用フォント: {fp} (サイズ: {font_size})")
-                        break
-                    except (OSError, IOError) as e:
-                        logger.debug(f"フォント読み込み失敗: {fp} - {e}")
-                        continue
-        elif platform.system() == "Darwin":  # macOS
-            font_candidates = [
-                "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",  # Bold
-                "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc",
-                "/System/Library/Fonts/ヒラギノ丸ゴ ProN W4.ttc",
-            ]
-            for fp in font_candidates:
-                if os.path.exists(fp):
-                    try:
-                        font = ImageFont.truetype(fp, font_size)
-                        logger.debug(f"字幕用フォント: {fp} (サイズ: {font_size})")
-                        break
-                    except (OSError, IOError) as e:
-                        logger.debug(f"フォント読み込み失敗: {fp} - {e}")
-                        continue
-        else:  # Linux (GitHub Actions ubuntu-latest)
-            font_candidates = [
-                ("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 0),  # Japanese (index 0)
-                ("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc", 0),
-                ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),
-                ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", 0),
-            ]
-            for fp, index in font_candidates:
-                if os.path.exists(fp):
-                    try:
-                        font = ImageFont.truetype(fp, font_size, index=index)
-                        logger.info(f"字幕用フォント: {fp} (index={index}, サイズ: {font_size})")
-                        break
-                    except (OSError, IOError) as e:
-                        logger.debug(f"フォント読み込み失敗: {fp} - {e}")
-                        continue
-
-        if font is None:
-            logger.error("⚠️ 字幕用日本語フォントが見つかりません！デフォルトフォントを使用します。")
-            logger.error(f"⚠️ Platform: {platform.system()}, 文字化けが発生する可能性があります。")
-            font = ImageFont.load_default()
-        else:
-            logger.info(f"✅ 字幕フォント読み込み成功 (サイズ: {font_size})")
+        # フォントを読み込む（キャッシュ使用）
+        font = self._get_subtitle_font()
 
         # テキストを折り返し（助詞・句読点で賢く改行）
         max_chars_per_line = 30

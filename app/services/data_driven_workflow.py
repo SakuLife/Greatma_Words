@@ -5,6 +5,7 @@ Uses YouTube analytics to inform content creation decisions.
 
 from app.config import settings
 from app.services.content_analyzer import ContentAnalyzer
+from app.services.dynamic_script_builder import DynamicScriptBuilder
 from app.services.person_info_fetcher import PersonInfoFetcher
 from app.services.script_generator import ScriptGenerator
 from app.services.sheets_manager import SheetsManager
@@ -19,6 +20,7 @@ class DataDrivenWorkflow:
         self.content_analyzer = ContentAnalyzer()
         self.person_fetcher = PersonInfoFetcher()
         self.script_generator = ScriptGenerator()
+        self.dynamic_script_builder = DynamicScriptBuilder()
         self.sheets_manager = SheetsManager() if settings.google_sheets_id else None
 
     async def suggest_next_video(
@@ -46,7 +48,13 @@ class DataDrivenWorkflow:
         try:
             analysis_text = await self.content_analyzer.get_content_suggestions_for_llm()
             logger.info("✅ Channel analysis complete")
-            logger.debug(f"Analysis:\n{analysis_text[:500]}...")
+            # 分析結果をログに出力
+            logger.info("=" * 60)
+            logger.info("[YouTube分析結果 - AI提案に使用]")
+            for line in analysis_text.strip().split("\n"):
+                if line.strip():
+                    logger.info(f"  {line}")
+            logger.info("=" * 60)
         except Exception as e:
             logger.error(f"❌ Failed to analyze channel performance: {e}")
             logger.error("Cannot suggest next video without performance data.")
@@ -146,7 +154,13 @@ class DataDrivenWorkflow:
             logger.info("Getting channel analysis for script context...")
             analysis_text = await self.content_analyzer.get_content_suggestions_for_llm()
             logger.info("✅ Channel analysis retrieved successfully")
-            logger.debug(f"Analysis preview: {analysis_text[:200]}...")
+            # 分析結果をログに出力（台本生成に使用されるデータ）
+            logger.info("=" * 60)
+            logger.info("[台本生成に使用する分析データ]")
+            for line in analysis_text.strip().split("\n"):
+                if line.strip():
+                    logger.info(f"  {line}")
+            logger.info("=" * 60)
         except Exception as e:
             logger.error(f"❌ Failed to get channel analysis: {e}")
             logger.error("This means past video performance data is NOT being used for content optimization.")
@@ -155,7 +169,36 @@ class DataDrivenWorkflow:
             logger.debug(traceback.format_exc())
             analysis_text = "チャンネル分析データは利用できません。"
 
-        # Add analysis context to script generation
+        # 動的プロンプト生成を試行
+        dynamic_prompt = None
+        try:
+            # Sheetsから最新の戦略データを読み込み
+            channel_analysis = None
+            competitor_analysis = None
+
+            if self.sheets_manager:
+                try:
+                    await self.sheets_manager.authenticate()
+                    strategies = await self.sheets_manager.read_latest_strategy()
+                    if strategies:
+                        logger.info(f"最新戦略を読み込み: {len(strategies)}件")
+                except Exception as e:
+                    logger.debug(f"戦略読み込みスキップ: {e}")
+
+            # 動的プロンプトを構築
+            dynamic_prompt = self.dynamic_script_builder.build_dynamic_prompt(
+                person_name=person_name,
+                topic=topic,
+                duration_minutes=duration_minutes,
+                channel_analysis=channel_analysis,
+                competitor_analysis=competitor_analysis,
+            )
+            logger.info("動的プロンプト生成成功")
+
+        except Exception as e:
+            logger.warning(f"動的プロンプト生成に失敗（固定テンプレートを使用）: {e}")
+
+        # 分析コンテキストを追加
         enhanced_prompt_context = f"""
 【チャンネル分析に基づく指針】
 {analysis_text}
@@ -169,7 +212,7 @@ class DataDrivenWorkflow:
 上記の分析結果と人物情報を踏まえて、視聴者の興味を引き、高いエンゲージメントが期待できる台本を生成してください。
 """
 
-        # Generate script with enhanced context
+        # Generate script with enhanced context（動的プロンプト or 固定テンプレート）
         logger.info("Generating script with data-driven context...")
         script = await self.script_generator.generate_script(
             topic=topic,
@@ -178,13 +221,14 @@ class DataDrivenWorkflow:
             model=model,
             temperature=temperature,
             additional_context=enhanced_prompt_context,
+            full_prompt_override=dynamic_prompt,
         )
 
         logger.info("Data-driven script generation complete")
         return suggestion, script
 
     async def _get_recently_featured_persons(
-        self, lookback_count: int = 10
+        self, lookback_count: int = 50
     ) -> list[str]:
         """
         Get list of recently featured persons from YouTube channel.
@@ -245,7 +289,7 @@ class DataDrivenWorkflow:
             return await self._get_recently_featured_persons_from_sheets(lookback_count)
 
     async def _get_recently_featured_persons_from_sheets(
-        self, lookback_count: int = 10
+        self, lookback_count: int = 50
     ) -> list[str]:
         """
         Fallback method to get recently featured persons from Google Sheets.

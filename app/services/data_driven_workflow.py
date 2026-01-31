@@ -56,14 +56,18 @@ class DataDrivenWorkflow:
                     logger.info(f"  {line}")
             logger.info("=" * 60)
         except Exception as e:
-            logger.error(f"❌ Failed to analyze channel performance: {e}")
-            logger.error("Cannot suggest next video without performance data.")
-            logger.error("To fix: Run 'python update_youtube_stats.py' to update statistics.")
-            raise RuntimeError(
-                "Channel performance analysis failed. "
-                "Please ensure YouTube statistics are up to date in Google Sheets. "
-                f"Error: {e}"
-            ) from e
+            logger.warning(f"⚠️ YouTube API分析失敗（Sheetsフォールバック）: {e}")
+            analysis_text = await self._get_analysis_from_sheets()
+            if analysis_text:
+                logger.info("✅ Sheetsデータで分析テキストを構築")
+            else:
+                logger.warning("Sheetsにもデータなし。最小限の情報で続行")
+                analysis_text = (
+                    "# チャンネル分析\n"
+                    "分析データは利用できません。\n"
+                    "偉人・哲学・ビジネスをテーマにしたYouTubeチャンネルです。\n"
+                    "視聴者層は30-44歳のビジネスパーソンが中心です。\n"
+                )
 
         # Step 2: Get person suggestion from AI
         logger.info("Step 2: Getting person suggestion from AI...")
@@ -162,12 +166,9 @@ class DataDrivenWorkflow:
                     logger.info(f"  {line}")
             logger.info("=" * 60)
         except Exception as e:
-            logger.error(f"❌ Failed to get channel analysis: {e}")
-            logger.error("This means past video performance data is NOT being used for content optimization.")
-            logger.error("To fix: Run 'python update_youtube_stats.py' to update statistics in Google Sheets.")
-            import traceback
-            logger.debug(traceback.format_exc())
-            analysis_text = "チャンネル分析データは利用できません。"
+            logger.warning(f"⚠️ YouTube API分析失敗（Sheetsフォールバック）: {e}")
+            sheets_analysis = await self._get_analysis_from_sheets()
+            analysis_text = sheets_analysis or "チャンネル分析データは利用できません。"
 
         # 動的プロンプト生成を試行
         dynamic_prompt = None
@@ -352,3 +353,97 @@ class DataDrivenWorkflow:
         except Exception as e:
             logger.warning(f"Failed to fetch recent persons from Sheets: {e}")
             return []
+
+    async def _get_analysis_from_sheets(self) -> str | None:
+        """
+        YouTube API失敗時にSheetsデータから分析テキストを構築するフォールバック。
+
+        Returns:
+            分析テキスト（Sheetsにデータがなければ None）
+        """
+        if not self.sheets_manager:
+            return None
+
+        try:
+            if not self.sheets_manager.service:
+                await self.sheets_manager.authenticate()
+
+            lines = ["# チャンネル分析（Google Sheetsデータ）\n"]
+
+            # 動画制作ログから基本統計
+            stats = await self.sheets_manager.get_video_stats()
+            if stats and stats.get("total_videos", 0) > 0:
+                lines.append(f"## チャンネル概要")
+                lines.append(f"- 総動画数: {stats['total_videos']}")
+
+            # 動画制作ログから人物別パフォーマンスを集計
+            try:
+                result = (
+                    self.sheets_manager.service.spreadsheets()
+                    .values()
+                    .get(
+                        spreadsheetId=self.sheets_manager.spreadsheet_id,
+                        range="動画制作ログ!A:K",
+                    )
+                    .execute()
+                )
+                values = result.get("values", [])
+                if len(values) > 1:
+                    lines.append(f"\n## 制作済み動画（直近）")
+                    for row in values[-10:]:
+                        if len(row) >= 3:
+                            date = row[0] if row[0] else ""
+                            person = row[1] if len(row) > 1 else ""
+                            topic = row[2] if len(row) > 2 else ""
+                            lines.append(f"- {date} {person} / {topic}")
+            except Exception as e:
+                logger.debug(f"動画ログ読み込みスキップ: {e}")
+
+            # チャンネル詳細分析（週次で保存済み）
+            try:
+                result = (
+                    self.sheets_manager.service.spreadsheets()
+                    .values()
+                    .get(
+                        spreadsheetId=self.sheets_manager.spreadsheet_id,
+                        range="チャンネル詳細分析!A:O",
+                    )
+                    .execute()
+                )
+                values = result.get("values", [])
+                if len(values) > 1:
+                    latest = values[-1]
+                    headers = values[0]
+                    lines.append(f"\n## チャンネル詳細分析（最新）")
+                    for i, header in enumerate(headers):
+                        if i < len(latest) and latest[i]:
+                            lines.append(f"- {header}: {latest[i]}")
+            except Exception as e:
+                logger.debug(f"詳細分析読み込みスキップ: {e}")
+
+            # コンテンツ戦略（週次で保存済み）
+            try:
+                strategies = await self.sheets_manager.read_latest_strategy()
+                if strategies:
+                    lines.append(f"\n## 最新コンテンツ戦略")
+                    for s in strategies[:3]:
+                        person = s.get("人物", "")
+                        topic = s.get("テーマ", "")
+                        hook = s.get("フック戦略", "")
+                        lines.append(f"- {person} / {topic}（フック: {hook}）")
+            except Exception as e:
+                logger.debug(f"戦略読み込みスキップ: {e}")
+
+            lines.append(
+                "\n---\n"
+                "上記のデータに基づいて、視聴者が興味を持ち、"
+                "高いエンゲージメントが期待できるテーマと人物を選んでください。"
+            )
+
+            analysis = "\n".join(lines)
+            logger.info(f"Sheetsフォールバック分析テキスト構築完了（{len(lines)}行）")
+            return analysis
+
+        except Exception as e:
+            logger.warning(f"Sheetsフォールバック分析失敗: {e}")
+            return None

@@ -47,6 +47,7 @@ class VideoCreator:
         self.fps = settings.video_fps
         self.resolution = (settings.video_width, settings.video_height)
         self._subtitle_font_cache = None  # フォントキャッシュ
+        self._subtitle_font_size = 52  # 字幕フォントサイズ
 
     def _get_subtitle_font(self):
         """字幕用フォントを取得（キャッシュ使用）"""
@@ -425,7 +426,7 @@ class VideoCreator:
         outline_width = 4  # アウトラインを太く（太字効果）
 
         # 行間を計算
-        line_height = font_size + 15
+        line_height = self._subtitle_font_size + 15
         total_text_height = len(lines) * line_height
         start_y = (subtitle_height - total_text_height) // 2
 

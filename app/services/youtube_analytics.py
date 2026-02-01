@@ -127,6 +127,14 @@ class YouTubeAnalytics:
         self.youtube_service = None
         self.analytics_service = None
 
+    @staticmethod
+    def _is_ci_environment() -> bool:
+        """CI環境かどうかを判定する。"""
+        return any(
+            os.environ.get(v)
+            for v in ("CI", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_URL")
+        )
+
     async def authenticate(self, token_file: str = "token.json") -> None:
         """
         Authenticate with YouTube API using OAuth 2.0.
@@ -140,11 +148,13 @@ class YouTubeAnalytics:
         logger.info("Authenticating with YouTube API for analytics")
 
         try:
-            # Load credentials from token file if it exists
-            if os.path.exists(token_file):
+            # Load credentials from token file if it exists and is not empty
+            if os.path.exists(token_file) and os.path.getsize(token_file) > 0:
                 self.credentials = Credentials.from_authorized_user_file(
                     token_file, self.scopes
                 )
+            elif os.path.exists(token_file):
+                logger.warning(f"Token file {token_file} exists but is empty, skipping")
 
             # If credentials don't exist or are invalid, get new ones
             if not self.credentials or not self.credentials.valid:
@@ -156,6 +166,15 @@ class YouTubeAnalytics:
                     logger.info("Refreshing expired credentials")
                     self.credentials.refresh(Request())
                 else:
+                    # CI環境ではブラウザOAuthフローを実行できない
+                    if self._is_ci_environment():
+                        raise RuntimeError(
+                            "YouTube token.json が無効または空です。"
+                            "CI環境ではブラウザ認証ができません。\n"
+                            "ローカルで python generate_youtube_token.py を実行し、"
+                            "YOUTUBE_TOKEN_JSON_B64 を更新してください。"
+                        )
+
                     if not os.path.exists(self.client_secrets_file):
                         raise FileNotFoundError(
                             f"Client secrets file not found: {self.client_secrets_file}"

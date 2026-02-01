@@ -15,7 +15,7 @@ from app.services.discord_notifier import DiscordNotifier
 from app.services.drive_manager import DriveManager
 from app.services.sheets_manager import SheetsManager
 from app.services.upload_time_optimizer import UploadTimeOptimizer
-from app.utils.logger import logger
+from app.utils.logger import logger, log_group, log_group_end
 from app.utils.person_titles import register_person_info
 from pydub import AudioSegment
 
@@ -57,9 +57,8 @@ async def generate_data_driven_video(
     sheets = SheetsManager() if log_to_sheets else None
     workflow = DataDrivenWorkflow()
 
-    logger.info("=" * 60)
-    logger.info("データドリブン動画生成開始")
-    logger.info("=" * 60)
+    log_group("データドリブン動画生成開始")
+    log_group_end()
 
     if discord:
         await discord.notify_task_progress(
@@ -68,8 +67,7 @@ async def generate_data_driven_video(
 
     try:
         # Step 1: Get data-driven suggestion and generate script
-        logger.info("Step 1: データ分析と台本生成")
-        logger.info("=" * 60)
+        log_group("Step 1: データ分析と台本生成")
 
         if auto_suggest and (not person_name or not topic):
             logger.info("AIによる人物・テーマ提案を実行中...")
@@ -111,6 +109,7 @@ async def generate_data_driven_video(
                 )
 
         logger.info(f"台本生成完了: {len(script.sections)}セクション")
+        log_group_end()
 
         # AIが取得した肩書・名言を登録（画像生成時に使用される）
         person_title = suggestion.get("person_title", "")
@@ -120,9 +119,7 @@ async def generate_data_driven_video(
             logger.info(f"✅ 人物情報を登録しました（画像生成用）")
 
         # Step 2: Generate complete video using existing orchestrator
-        logger.info("=" * 60)
-        logger.info("Step 2: 動画生成開始")
-        logger.info("=" * 60)
+        log_group("Step 2: 動画生成")
 
         if discord:
             await discord.notify_task_progress(
@@ -153,6 +150,7 @@ async def generate_data_driven_video(
         project, video_path = await orchestrator.generate_complete_video(config)
 
         logger.info(f"動画生成成功: {video_path}")
+        log_group_end()
 
         # Get video duration from audio file
         audio_path = project.audio_dir / "narration.wav"
@@ -204,9 +202,7 @@ async def generate_data_driven_video(
         drive_url = None
         if upload_to_drive and drive:
             try:
-                logger.info("=" * 60)
-                logger.info("Step 4: Google Driveアップロード")
-                logger.info("=" * 60)
+                log_group("Step 4: Google Driveアップロード")
 
                 if discord:
                     try:
@@ -232,16 +228,16 @@ async def generate_data_driven_video(
                         )
                     except Exception as e:
                         logger.warning(f"Discord notification failed (Drive complete): {e}")
+                log_group_end()
             except Exception as e:
+                log_group_end()
                 logger.error(f"Google Drive upload failed: {e}")
                 # Continue even if Drive upload fails
 
         # Step 5: Log to Google Sheets
         if log_to_sheets and sheets:
             try:
-                logger.info("=" * 60)
-                logger.info("Step 5: Google Sheetsログ記録")
-                logger.info("=" * 60)
+                log_group("Step 5: Google Sheetsログ記録")
 
                 if discord:
                     try:
@@ -269,11 +265,13 @@ async def generate_data_driven_video(
                 )
 
                 if success:
-                    logger.info("✅ Sheetsログ記録完了")
+                    logger.info("Sheetsログ記録完了")
                 else:
-                    logger.error("❌ Sheetsログ記録に失敗しました（詳細は上のログを確認）")
+                    logger.error("Sheetsログ記録に失敗しました（詳細は上のログを確認）")
+                log_group_end()
             except Exception as e:
-                logger.error(f"❌ Google Sheets logging failed: {e}")
+                log_group_end()
+                logger.error(f"Google Sheets logging failed: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
                 # Continue even if Sheets logging fails
@@ -310,9 +308,8 @@ async def generate_data_driven_video(
             except Exception as e:
                 logger.warning(f"Discord notification failed (completion): {e}")
 
-        logger.info("=" * 60)
-        logger.info(f"✅ 完了! 合計時間: {total_time:.1f}秒")
-        logger.info("=" * 60)
+        log_group(f"完了! 合計時間: {total_time:.1f}秒")
+        log_group_end()
 
         return {
             "success": True,

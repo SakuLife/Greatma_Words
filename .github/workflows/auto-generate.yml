@@ -60,25 +60,46 @@ jobs:
         continue-on-error: true
         run: |
           if [ -n "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" ]; then
-            printf '%s' "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > token.json || echo "Failed to decode token.json, skipping..."
-            if [ -f token.json ]; then
+            printf '%s' "${{ secrets.YOUTUBE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > token.json 2>/dev/null
+            if [ -f token.json ] && [ -s token.json ]; then
               echo "token.json size: $(wc -c < token.json) bytes"
-              head -c 100 token.json && echo ""  # 最初の100文字を表示（デバッグ用）
+              # JSONとして有効か確認
+              if python3 -c "import json; json.load(open('token.json'))" 2>/dev/null; then
+                echo "::notice::token.json is valid JSON"
+              else
+                echo "::error::token.json is not valid JSON - YouTube upload will fail"
+                rm -f token.json
+              fi
+            else
+              echo "::warning::token.json is empty or decode failed - YouTube upload will be skipped"
+              rm -f token.json
             fi
+          else
+            echo "::warning::YOUTUBE_TOKEN_JSON_B64 secret is not set - YouTube upload will be skipped"
           fi
 
       - name: Write Google token (optional, Drive/Sheets refresh token)
         continue-on-error: true
         run: |
           if [ -n "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" ]; then
-            printf '%s' "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > google_token.json || echo "Failed to decode google_token, skipping..."
-            if [ -f google_token.json ]; then
+            printf '%s' "${{ secrets.GOOGLE_TOKEN_JSON_B64 }}" | tr -d '\n\r' | base64 -d > google_token.json 2>/dev/null
+            if [ -f google_token.json ] && [ -s google_token.json ]; then
               echo "google_token.json size: $(wc -c < google_token.json) bytes"
-              # DriveManager と SheetsManager 用にもコピー
-              cp google_token.json drive_token.json
-              cp google_token.json sheets_token.json
-              echo "Copied to drive_token.json and sheets_token.json"
+              if python3 -c "import json; json.load(open('google_token.json'))" 2>/dev/null; then
+                echo "::notice::google_token.json is valid JSON"
+                cp google_token.json drive_token.json
+                cp google_token.json sheets_token.json
+                echo "Copied to drive_token.json and sheets_token.json"
+              else
+                echo "::error::google_token.json is not valid JSON"
+                rm -f google_token.json
+              fi
+            else
+              echo "::warning::google_token.json is empty or decode failed"
+              rm -f google_token.json
             fi
+          else
+            echo "::warning::GOOGLE_TOKEN_JSON_B64 secret is not set"
           fi
 
       - name: Generate .env from secrets

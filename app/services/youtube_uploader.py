@@ -30,6 +30,14 @@ class YouTubeUploader:
         self.credentials = None
         self.youtube_service = None
 
+    @staticmethod
+    def _is_ci_environment() -> bool:
+        """CI環境かどうかを判定する。"""
+        return any(
+            os.environ.get(v)
+            for v in ("CI", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_URL")
+        )
+
     async def authenticate(self, token_file: str = "token.json") -> None:
         """
         Authenticate with YouTube API using OAuth 2.0.
@@ -62,6 +70,17 @@ class YouTubeUploader:
                     logger.info("Refreshing expired credentials")
                     self.credentials.refresh(Request())
                 else:
+                    # CI環境ではブラウザOAuthフローを実行できない
+                    if self._is_ci_environment():
+                        raise RuntimeError(
+                            "YouTube token.json が無効または空です。"
+                            "CI環境ではブラウザ認証ができません。\n"
+                            "ローカルで以下を実行してtokenを再生成してください:\n"
+                            "  python generate_youtube_token.py\n"
+                            "生成された token.json をbase64エンコードして "
+                            "GitHub Secrets の YOUTUBE_TOKEN_JSON_B64 に設定してください。"
+                        )
+
                     if not os.path.exists(self.client_secrets_file):
                         raise FileNotFoundError(
                             f"Client secrets file not found: {self.client_secrets_file}. "

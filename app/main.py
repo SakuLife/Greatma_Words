@@ -23,7 +23,7 @@ from app.services.video_creator import VideoCreator
 from app.services.youtube_uploader import YouTubeUploader
 from app.services.description_generator import DescriptionGenerator
 from app.utils.file_manager import FileManager
-from app.utils.logger import logger
+from app.utils.logger import logger, log_group, log_group_end
 from app.utils.voicevox_launcher import launcher as voicevox_launcher
 import re
 
@@ -125,7 +125,7 @@ class VideoGenerationOrchestrator:
 
         try:
             # Step 2: Generate script
-            logger.info("Step 1/5: Generating script...")
+            log_group("Step 1/5: 台本生成")
             script = await self.script_generator.generate_script(
                 topic=config.topic,
                 person_name=config.person_name,
@@ -141,23 +141,22 @@ class VideoGenerationOrchestrator:
             self.file_manager.save_project(project)
 
             logger.info(f"Script generated: {len(script_text)} characters")
+            log_group_end()
 
             # Step 3: Generate images (optional)
             image_path = self.file_manager.get_image_path(
                 project, f"{config.person_name}.png"
             )
 
+            log_group("Step 2/5: 画像生成")
             if settings.skip_image_generation:
-                logger.info("Step 2/5: Skipping image generation (using existing images)")
+                logger.info("Skipping image generation (using existing images)")
                 if not image_path.exists():
                     logger.warning(f"Image not found at {image_path}. Please add image manually.")
             elif image_path.exists():
-                # 既存の画像がある場合はスキップ
-                logger.info(f"Step 2/5: Image already exists, skipping generation: {image_path}")
-                logger.info(f"[INFO] 既存の画像を使用します: {image_path}")
+                logger.info(f"既存の画像を使用します: {image_path}")
             else:
-                logger.info("Step 2/5: Generating images...")
-                logger.info(f"[INFO] 画像生成を開始します: {config.person_name}")
+                logger.info(f"画像生成を開始します: {config.person_name}")
 
                 # Create main person slide
                 person_description = f"Professional portrait of {config.person_name}"
@@ -172,9 +171,10 @@ class VideoGenerationOrchestrator:
 
             project.status = ProjectStatus.IMAGES_GENERATED
             self.file_manager.save_project(project)
+            log_group_end()
 
             # Step 4: Synthesize voice
-            logger.info("Step 3/5: Synthesizing voice...")
+            log_group("Step 3/5: 音声合成")
 
             audio_path = self.file_manager.get_audio_path(project, "narration.wav")
 
@@ -209,9 +209,10 @@ class VideoGenerationOrchestrator:
             self.file_manager.save_project(project)
 
             logger.info(f"Audio synthesized: {audio_path}")
+            log_group_end()
 
             # Step 5: Create video
-            logger.info("Step 4/5: Creating video...")
+            log_group("Step 4/5: 動画生成")
 
             video_path = self.file_manager.get_video_path(project)
 
@@ -252,10 +253,11 @@ class VideoGenerationOrchestrator:
             self.file_manager.save_project(project)
 
             logger.info(f"Video created: {video_path}")
+            log_group_end()
 
             # Step 6: Generate thumbnail (optional, can be skipped if generating manually)
             if settings.use_thumbnail_generation and not settings.skip_thumbnail_generation:
-                logger.info("Step 5/6: Generating thumbnail...")
+                log_group("Step 5/6: サムネイル生成")
 
                 thumbnail_path = self.file_manager.get_thumbnail_path(project)
 
@@ -284,12 +286,13 @@ class VideoGenerationOrchestrator:
                 self.file_manager.save_project(project)
 
                 logger.info(f"Thumbnail generated: {thumbnail_path}")
+                log_group_end()
             else:
                 logger.info("Step 5/6: Skipping thumbnail generation (not enabled)")
 
             # Step 7: Upload to YouTube (optional)
             if config.upload_to_youtube:
-                logger.info("Step 6/6: Uploading to YouTube...")
+                log_group("Step 6/6: YouTubeアップロード")
 
                 # Calculate scheduled publish time (next 18:00 JST)
                 publish_time = calculate_next_publish_time(target_hour=18)
@@ -319,7 +322,7 @@ class VideoGenerationOrchestrator:
                 self.file_manager.save_project(project)
 
                 logger.info(
-                    f"Video uploaded to YouTube: https://www.youtube.com/watch?v={video_id}"
+                    f"Video uploaded: https://www.youtube.com/watch?v={video_id}"
                 )
 
                 # Set thumbnail on YouTube if generated
@@ -335,6 +338,7 @@ class VideoGenerationOrchestrator:
                         logger.debug(traceback.format_exc())
                 else:
                     logger.warning(f"Thumbnail not found or not generated: {project.thumbnail_path}")
+                log_group_end()
             else:
                 logger.info("Step 6/6: Skipping YouTube upload (not enabled)")
 

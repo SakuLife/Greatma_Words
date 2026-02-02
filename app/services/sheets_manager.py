@@ -106,6 +106,8 @@ class SheetsManager:
         youtube_url: str | None = None,
         drive_url: str | None = None,
         project_path: str | None = None,
+        auto_comment_status: str = "",
+        auto_comment_text: str = "",
         sheet_name: str = "動画制作ログ",
     ) -> bool:
         """
@@ -119,6 +121,8 @@ class SheetsManager:
             youtube_url: YouTube video URL (optional)
             drive_url: Google Drive URL (optional)
             project_path: Project directory path (optional)
+            auto_comment_status: 自動コメント投稿結果（"成功" / "失敗" / ""）
+            auto_comment_text: 投稿したコメント本文
             sheet_name: Name of the sheet to write to
 
         Returns:
@@ -156,10 +160,12 @@ class SheetsManager:
                 "",  # いいね数 (will be updated later)
                 "",  # コメント数 (will be updated later)
                 drive_url or "",
+                auto_comment_status,
+                auto_comment_text[:100] if auto_comment_text else "",  # 長すぎる場合は100文字で切る
             ]
 
             # Append row to sheet
-            range_name = f"{sheet_name}!A:K"
+            range_name = f"{sheet_name}!A:M"
 
             body = {"values": [row_data]}
 
@@ -462,6 +468,90 @@ class SheetsManager:
         except Exception as e:
             logger.error(f"Failed to get video stats: {e}")
             return {}
+
+    async def get_pending_comments(
+        self, sheet_name: str = "動画制作ログ"
+    ) -> list[dict[str, str]]:
+        """
+        コメントが「保留」になっているエントリを取得する。
+
+        Args:
+            sheet_name: シート名
+
+        Returns:
+            保留コメントのリスト [{row_index, youtube_url, comment_text}, ...]
+        """
+        if not self.service:
+            await self.authenticate()
+
+        try:
+            range_name = f"{sheet_name}!A:M"
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .get(spreadsheetId=self.spreadsheet_id, range=range_name)
+                .execute()
+            )
+
+            values = result.get("values", [])
+            pending = []
+
+            for i, row in enumerate(values[1:], start=2):  # 1-indexed, skip header
+                if len(row) >= 13 and row[11] == "保留" and row[12]:
+                    youtube_url = row[6] if len(row) > 6 else ""
+                    if youtube_url:
+                        # URLからvideo_idを抽出
+                        video_id = youtube_url.split("v=")[-1] if "v=" in youtube_url else ""
+                        if video_id:
+                            pending.append({
+                                "row_index": i,
+                                "video_id": video_id,
+                                "youtube_url": youtube_url,
+                                "comment_text": row[12],
+                                "person_name": row[1] if len(row) > 1 else "",
+                            })
+
+            logger.info(f"保留コメント: {len(pending)}件")
+            return pending
+
+        except Exception as e:
+            logger.error(f"保留コメント取得に失敗: {e}")
+            return []
+
+    async def update_comment_status(
+        self,
+        row_index: int,
+        status: str,
+        sheet_name: str = "動画制作ログ",
+    ) -> bool:
+        """
+        コメントステータスを更新する。
+
+        Args:
+            row_index: 行番号（1-indexed）
+            status: 新しいステータス（"成功" / "失敗"）
+            sheet_name: シート名
+
+        Returns:
+            成功したらTrue
+        """
+        if not self.service:
+            await self.authenticate()
+
+        try:
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!L{row_index}",
+                valueInputOption="RAW",
+                body={"values": [[status]]},
+            ).execute()
+
+            logger.info(f"コメントステータスを更新: 行{row_index} → {status}")
+            return True
+
+        except Exception as e:
+            logger.error(f"コメントステータス更新に失敗: {e}")
+            return False
 
     # ========================================
     # 週次分析・A/Bテスト用メソッド

@@ -307,6 +307,67 @@ class YouTubeUploader:
             logger.error(f"Failed to set thumbnail: {e}")
             raise RuntimeError(f"Failed to set thumbnail: {e}") from e
 
+    async def post_comment(
+        self,
+        video_id: str,
+        comment_text: str,
+    ) -> tuple[str | None, str]:
+        """
+        動画にコメントを投稿する。
+
+        Args:
+            video_id: YouTube動画ID
+            comment_text: コメント本文
+
+        Returns:
+            (コメントID, ステータス) のタプル
+            ステータス: "成功" / "コメント無効" / "失敗"
+        """
+        if not self.youtube_service:
+            await self.authenticate()
+
+        logger.info(f"Posting comment on video: {video_id}")
+
+        try:
+            body = {
+                "snippet": {
+                    "videoId": video_id,
+                    "topLevelComment": {
+                        "snippet": {
+                            "textOriginal": comment_text,
+                        }
+                    },
+                }
+            }
+
+            response = (
+                self.youtube_service.commentThreads()
+                .insert(part="snippet", body=body)
+                .execute()
+            )
+
+            comment_id = response.get("id", "")
+            logger.info(f"Comment posted successfully: {comment_id}")
+            return comment_id, "成功"
+
+        except Exception as e:
+            error_str = str(e)
+            if "commentsDisabled" in error_str:
+                logger.info(
+                    f"コメント無効（予約投稿の動画は公開後にリトライ）: {video_id}"
+                )
+                return None, "コメント無効"
+            elif "forbidden" in error_str.lower() or "403" in error_str:
+                # private動画ではcommentsDisabledではなくforbiddenが返る場合がある
+                # 自分の動画で403が出る場合はほぼコメント無効（private/予約投稿）
+                logger.info(
+                    f"コメント無効（権限エラー：予約投稿の動画は公開後にリトライ）: {video_id}"
+                )
+                return None, "コメント無効"
+            else:
+                logger.warning(f"Failed to post comment: {e}")
+                return None, "失敗"
+
     async def get_video_info(self, video_id: str) -> dict:
         """
         Get information about a video.

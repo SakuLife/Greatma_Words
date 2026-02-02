@@ -122,7 +122,8 @@ jobs:
           VOICEVOX_API_URL=http://localhost:50021
           VOICEVOX_SPEAKER_ID=13
           YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
-          YOUTUBE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/yt-analytics.readonly
+          YOUTUBE_OAUTH_SCOPES=https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/yt-analytics.readonly
+          YOUTUBE_AUTO_COMMENT=true
           AB_TEST_ENABLED=${{ vars.AB_TEST_ENABLED || 'false' }}
           AB_TEST_ROTATION_DAYS=7
           AB_TEST_MIN_IMPRESSIONS=100
@@ -160,6 +161,13 @@ jobs:
           done
           echo "VOICEVOX API did not become ready within 60 seconds"
           exit 1
+
+      - name: Retry pending comments (from previous scheduled videos)
+        continue-on-error: true
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: python retry_pending_comments.py
 
       - name: Run data-driven generation
         env:

@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 from app.config import settings
 from app.utils.logger import logger
-from app.utils.person_titles import get_person_title
+from app.utils.person_titles import get_person_title, get_person_appearance
 
 
 class ThumbnailGenerator:
@@ -352,7 +352,7 @@ STYLE:
 - Eye-catching, click-worthy design
 - High contrast between text and background
 
-PERSON: Business leader, confident expression, looking at camera
+PERSON: {get_person_appearance(person_name)}, confident expression, looking at camera
 
 IMPORTANT: The Japanese text must be clearly readable and prominent."""
 

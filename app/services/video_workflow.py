@@ -19,6 +19,7 @@ from app.services.thumbnail_generator import ThumbnailGenerator
 from app.services.video_creator import VideoCreator
 from app.services.voice_synthesizer import VoiceSynthesizer
 from app.services.youtube_uploader import YouTubeUploader
+from app.services.comment_generator import CommentGenerator
 from app.utils.file_manager import FileManager
 from app.utils.logger import logger
 
@@ -99,6 +100,8 @@ class VideoWorkflow:
         self.voice_synthesizer = VoiceSynthesizer()
         self.video_creator = VideoCreator()
         self.thumbnail_generator = ThumbnailGenerator()
+
+        self.comment_generator = CommentGenerator()
 
         # Initialize optional services
         self.youtube_uploader = YouTubeUploader() if enable_youtube else None
@@ -238,6 +241,8 @@ class VideoWorkflow:
             logger.info("Step 6/6: Uploading...")
             youtube_url = None
             video_id = None
+            auto_comment_status = ""
+            auto_comment_text = ""
 
             if upload_to_youtube and self.youtube_uploader and self.enable_youtube:
                 if self.discord_notifier:
@@ -267,6 +272,33 @@ class VideoWorkflow:
                 # Set thumbnail if generated
                 if thumbnail_file and thumbnail_file.exists():
                     await self.youtube_uploader.set_thumbnail(video_id, thumbnail_file)
+
+                # 自動コメント投稿（台本のCTAに対するお手本コメント）
+                auto_comment_status = ""
+                auto_comment_text = ""
+                if settings.youtube_auto_comment:
+                    try:
+                        import asyncio
+                        await asyncio.sleep(10)
+                        auto_comment_text = await self.comment_generator.generate_comment(
+                            person_name=person_name,
+                            topic=theme,
+                            script_sections=script.sections if script else None,
+                        )
+                        comment_id, auto_comment_status = await self.youtube_uploader.post_comment(
+                            video_id, auto_comment_text
+                        )
+                        if comment_id:
+                            logger.info(f"Auto-comment posted: {comment_id}")
+                        elif auto_comment_status == "コメント無効":
+                            # 予約投稿（private）動画はコメント無効 → 保留にして公開後にリトライ
+                            auto_comment_status = "保留"
+                            logger.info(
+                                "コメント保留: 動画公開後にリトライが必要です"
+                            )
+                    except Exception as e:
+                        auto_comment_status = "失敗"
+                        logger.warning(f"Auto-comment failed (non-critical): {e}")
 
                 if self.discord_notifier:
                     await self.discord_notifier.notify_youtube_uploaded(
@@ -299,6 +331,8 @@ class VideoWorkflow:
                     youtube_url=youtube_url,
                     drive_url=drive_url,
                     project_path=str(project_dir),
+                    auto_comment_status=auto_comment_status if upload_to_youtube else "",
+                    auto_comment_text=auto_comment_text if upload_to_youtube else "",
                 )
 
             # Step 10: Send completion notification
@@ -374,6 +408,68 @@ class VideoWorkflow:
             completion_date=completion_date,
             notes=notes,
         )
+
+    async def post_pending_comments(self) -> dict[str, Any]:
+        """
+        保留中のコメントをリトライする。
+
+        予約投稿（private）動画はコメントが無効なため、動画公開後にこのメソッドで
+        保留コメントを投稿する。GitHub Actionsのスケジュール等から呼び出す。
+
+        Returns:
+            結果サマリー辞書
+        """
+        if not self.sheets_manager or not self.enable_sheets:
+            logger.warning("Google Sheets not enabled, cannot retry pending comments")
+            return {"success": 0, "failed": 0, "still_pending": 0}
+
+        if not self.youtube_uploader or not self.enable_youtube:
+            logger.warning("YouTube not enabled, cannot retry pending comments")
+            return {"success": 0, "failed": 0, "still_pending": 0}
+
+        # Sheetsから保留コメントを取得
+        pending = await self.sheets_manager.get_pending_comments()
+        if not pending:
+            logger.info("保留コメントはありません")
+            return {"success": 0, "failed": 0, "still_pending": 0}
+
+        logger.info(f"保留コメント {len(pending)}件 のリトライを開始")
+
+        success = 0
+        failed = 0
+        still_pending = 0
+
+        for entry in pending:
+            video_id = entry["video_id"]
+            comment_text = entry["comment_text"]
+            row_index = entry["row_index"]
+
+            logger.info(f"リトライ: {video_id} ({entry.get('person_name', '')})")
+
+            comment_id, status = await self.youtube_uploader.post_comment(
+                video_id, comment_text
+            )
+
+            if comment_id:
+                await self.sheets_manager.update_comment_status(row_index, "成功")
+                success += 1
+                logger.info(f"コメント投稿成功: {video_id}")
+            elif status == "コメント無効":
+                # まだ公開されていない → 保留のまま
+                still_pending += 1
+                logger.info(f"まだコメント無効（未公開）: {video_id}")
+            else:
+                await self.sheets_manager.update_comment_status(row_index, "失敗")
+                failed += 1
+                logger.warning(f"コメント投稿失敗: {video_id} ({status})")
+
+        result = {
+            "success": success,
+            "failed": failed,
+            "still_pending": still_pending,
+        }
+        logger.info(f"保留コメントリトライ完了: {result}")
+        return result
 
     async def get_production_stats(self) -> dict[str, Any]:
         """

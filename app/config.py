@@ -47,9 +47,10 @@ class Settings(BaseSettings):
 
     # YouTube API
     youtube_client_secrets_file: str = "client_secrets.json"
-    youtube_oauth_scopes: str = "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/yt-analytics.readonly"
+    youtube_oauth_scopes: str = "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/yt-analytics.readonly"
     youtube_default_category: int = 22  # People & Blogs
     youtube_default_privacy: Literal["public", "private", "unlisted"] = "private"
+    youtube_auto_comment: bool = True  # 動画アップロード後に自動コメントを投稿
 
     # Google Drive API
     google_client_secrets_file: str = "client_secrets.json"

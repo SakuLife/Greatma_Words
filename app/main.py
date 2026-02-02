@@ -21,9 +21,11 @@ from app.services.thumbnail_copywriter import ThumbnailCopywriter
 from app.services.voice_synthesizer import VoiceSynthesizer
 from app.services.video_creator import VideoCreator
 from app.services.youtube_uploader import YouTubeUploader
+from app.services.comment_generator import CommentGenerator
 from app.services.description_generator import DescriptionGenerator
 from app.utils.file_manager import FileManager
 from app.utils.logger import logger, log_group, log_group_end
+from app.utils.person_titles import get_person_appearance
 from app.utils.voicevox_launcher import launcher as voicevox_launcher
 import re
 
@@ -98,6 +100,7 @@ class VideoGenerationOrchestrator:
         self.voice_synthesizer = VoiceSynthesizer()
         self.video_creator = VideoCreator()
         self.youtube_uploader = YouTubeUploader()
+        self.comment_generator = CommentGenerator()
         self.description_generator = DescriptionGenerator()
 
     async def generate_complete_video(
@@ -158,8 +161,9 @@ class VideoGenerationOrchestrator:
             else:
                 logger.info(f"画像生成を開始します: {config.person_name}")
 
-                # Create main person slide
-                person_description = f"Professional portrait of {config.person_name}"
+                # 人物の外見描写を取得（年齢・特徴を含む）
+                appearance = get_person_appearance(config.person_name)
+                person_description = f"Professional portrait of {config.person_name}, {appearance}"
 
                 await self.image_generator.generate_person_slide(
                     person_name=config.person_name,
@@ -338,6 +342,29 @@ class VideoGenerationOrchestrator:
                         logger.debug(traceback.format_exc())
                 else:
                     logger.warning(f"Thumbnail not found or not generated: {project.thumbnail_path}")
+
+                # 自動コメント投稿（台本のCTAに対するお手本コメント）
+                if settings.youtube_auto_comment:
+                    try:
+                        import asyncio
+                        await asyncio.sleep(10)
+                        comment_text = await self.comment_generator.generate_comment(
+                            person_name=config.person_name,
+                            topic=config.topic,
+                            script_sections=script.sections if script else None,
+                        )
+                        comment_id, comment_status = await self.youtube_uploader.post_comment(
+                            video_id, comment_text
+                        )
+                        if comment_id:
+                            logger.info(f"Auto-comment posted: {comment_id}")
+                        elif comment_status == "コメント無効":
+                            logger.info(
+                                "コメント保留: 予約投稿動画のため公開後にリトライが必要です"
+                            )
+                    except Exception as e:
+                        logger.warning(f"Auto-comment failed (non-critical): {e}")
+
                 log_group_end()
             else:
                 logger.info("Step 6/6: Skipping YouTube upload (not enabled)")
@@ -400,7 +427,9 @@ class VideoGenerationOrchestrator:
                 logger.info("Step 1/5: Generating images...")
                 logger.info(f"[INFO] 画像生成を開始します: {config.person_name}")
 
-                person_description = f"Professional portrait of {config.person_name}"
+                # 人物の外見描写を取得（年齢・特徴を含む）
+                appearance = get_person_appearance(config.person_name)
+                person_description = f"Professional portrait of {config.person_name}, {appearance}"
 
                 await self.image_generator.generate_person_slide(
                     person_name=config.person_name,
@@ -573,6 +602,29 @@ class VideoGenerationOrchestrator:
                 logger.info(
                     f"Video uploaded to YouTube: https://www.youtube.com/watch?v={video_id}"
                 )
+
+                # 自動コメント投稿（台本のCTAに対するお手本コメント）
+                if settings.youtube_auto_comment:
+                    try:
+                        import asyncio
+                        await asyncio.sleep(10)
+                        comment_text = await self.comment_generator.generate_comment(
+                            person_name=config.person_name,
+                            topic=config.topic,
+                            script_sections=script.sections if script else None,
+                        )
+                        comment_id, comment_status = await self.youtube_uploader.post_comment(
+                            video_id, comment_text
+                        )
+                        if comment_id:
+                            logger.info(f"Auto-comment posted: {comment_id}")
+                        elif comment_status == "コメント無効":
+                            logger.info(
+                                "コメント保留: 予約投稿動画のため公開後にリトライが必要です"
+                            )
+                    except Exception as e:
+                        logger.warning(f"Auto-comment failed (non-critical): {e}")
+
             else:
                 logger.info("Step 5/5: Skipping YouTube upload (not enabled)")
 

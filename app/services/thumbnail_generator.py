@@ -54,6 +54,7 @@ class ThumbnailGenerator:
         style: str = "professional",
         quote: str | None = None,
         thumbnail_copy: dict | None = None,
+        reference_image_urls: list[str] | None = None,
     ) -> Path:
         """
         Generate a YouTube thumbnail featuring the person with text.
@@ -69,6 +70,7 @@ class ThumbnailGenerator:
                 "sub_copy": "サブコピー",
                 "keywords": ["キーワード"]
             }
+            reference_image_urls: 参照画像のURLリスト（img2img用）
 
         Returns:
             Path to generated thumbnail file
@@ -82,7 +84,7 @@ class ThumbnailGenerator:
 
         if provider == "nanobanana":
             thumbnail_path = await self._generate_with_nanobanana(
-                person_name, topic, output_path, style, quote, thumbnail_copy
+                person_name, topic, output_path, style, quote, thumbnail_copy, reference_image_urls
             )
         elif provider == "dalle":
             thumbnail_path = await self._generate_with_dalle(
@@ -98,9 +100,14 @@ class ThumbnailGenerator:
         logger.info(f"Thumbnail saved to {thumbnail_path}")
         return thumbnail_path
 
+    # リトライ設定
+    RETRY_WAIT_SECONDS = 180  # リトライ前の待機時間（3分）
+    MAX_RETRIES = 1  # リトライ回数（1回まで）
+
     async def _generate_with_nanobanana(
         self, person_name: str, topic: str, output_path: Path, style: str,
-        quote: str | None = None, thumbnail_copy: dict | None = None
+        quote: str | None = None, thumbnail_copy: dict | None = None,
+        reference_image_urls: list[str] | None = None
     ) -> Path:
         """Generate thumbnail using KIE AI API (nano-banana-pro model) with text."""
         if not self.nanobanana_api_key:
@@ -109,152 +116,183 @@ class ThumbnailGenerator:
             )
             return await self._generate_with_dalle(person_name, topic, output_path, style, quote)
 
-        try:
-            import time
-
-            # 肩書を取得
-            person_title = get_person_title(person_name) or ""
-
-            # プロンプト作成（文字入り画像生成用）
-            prompt = self._create_thumbnail_prompt_with_text(
-                person_name, person_title, topic, style, thumbnail_copy
-            )
-            logger.info(f"KIE AI thumbnail prompt: {prompt}")
-
-            # KIE AI API: タスク作成
-            headers = {
-                "Authorization": f"Bearer {self.nanobanana_api_key}",
-                "Content-Type": "application/json",
-            }
-
-            # KIE AI API仕様に合わせたペイロード
-            # nanobanana pro: 高品質サムネイル用（後でPythonで文字追加）
-            payload = {
-                "model": self.thumbnail_model,  # google/nano-banana-pro
-                "input": {
-                    "prompt": prompt,
-                    "aspect_ratio": "16:9",  # YouTubeサムネイル
-                    "resolution": "2K",  # 高解像度
-                    "output_format": "png",
-                },
-            }
-            logger.info(f"Using thumbnail model: {self.thumbnail_model}")
-
-            # タスク作成
-            response = requests.post(
-                f"{self.nanobanana_api_url}/jobs/createTask",
-                json=payload,
-                headers=headers,
-                timeout=60,
-            )
-            response.raise_for_status()
-            result = response.json()
-
-            logger.info(f"KIE AI createTask response: {result}")
-
-            # KIE AI response format: {"code": 200, "data": {"taskId": "..."}}
-            task_id = (
-                result.get("data", {}).get("taskId")
-                or result.get("data", {}).get("task_id")
-                or result.get("data", {}).get("id")
-                or result.get("id")
-                or result.get("task_id")
-                or result.get("taskId")
-            )
-            if not task_id:
-                raise ValueError(f"No task ID in response: {result}")
-
-            logger.info(f"KIE AI task created: {task_id}")
-
-            # ポーリングでタスク完了を待つ
-            max_attempts = 60  # 最大60回（約5分）
-            for attempt in range(max_attempts):
-                time.sleep(5)  # 5秒待機
-
-                status_response = requests.get(
-                    f"{self.nanobanana_api_url}/jobs/recordInfo?taskId={task_id}",
-                    headers=headers,
-                    timeout=30,
+        last_error: Exception | None = None
+        for retry in range(self.MAX_RETRIES + 1):
+            if retry > 0:
+                logger.info(
+                    f"サムネイル生成リトライ {retry}/{self.MAX_RETRIES}: "
+                    f"{self.RETRY_WAIT_SECONDS}秒待機後に再実行します..."
                 )
-                status_response.raise_for_status()
-                status_result = status_response.json()
+                import time as _time
+                _time.sleep(self.RETRY_WAIT_SECONDS)
 
-                # KIE AI uses "state" not "status"
-                state = status_result.get("data", {}).get("state")
-                logger.info(f"Task {task_id} state: {state} (attempt {attempt + 1}/{max_attempts})")
-                if attempt == 0:  # 最初の1回だけ全レスポンスをログ
-                    logger.info(f"KIE AI status response: {status_result}")
+            try:
+                return await self._generate_nanobanana_once(
+                    person_name, topic, output_path, style, quote, thumbnail_copy, reference_image_urls
+                )
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"サムネイル生成失敗（試行{retry + 1}/{self.MAX_RETRIES + 1}）: {e}"
+                )
 
-                if state == "success":
-                    # KIE AI: resultJsonをパースしてresultUrlsを取得
-                    import json
+        raise RuntimeError(
+            f"Thumbnail generation failed with KIE AI after {self.MAX_RETRIES + 1} attempts: {last_error}"
+        ) from last_error
 
-                    result_json_str = status_result.get("data", {}).get("resultJson")
-                    if result_json_str:
-                        try:
-                            result_json = json.loads(result_json_str)
-                            result_urls = result_json.get("resultUrls", [])
-                            image_url = result_urls[0] if result_urls else None
-                            logger.info(f"Parsed resultJson, got image_url: {image_url}")
-                        except (json.JSONDecodeError, IndexError, TypeError) as e:
-                            logger.error(f"Failed to parse resultJson: {e}")
-                            image_url = None
-                    else:
-                        # フォールバック: 他のフォーマットも試す
-                        image_url = (
-                            status_result.get("result", {}).get("url")
-                            or status_result.get("output", {}).get("url")
-                            or status_result.get("data", {}).get("result", {}).get("url")
-                            or status_result.get("data", {}).get("output", {}).get("url")
-                            or status_result.get("image_url")
-                            or status_result.get("url")
-                        )
+    async def _generate_nanobanana_once(
+        self, person_name: str, topic: str, output_path: Path, style: str,
+        quote: str | None = None, thumbnail_copy: dict | None = None,
+        reference_image_urls: list[str] | None = None
+    ) -> Path:
+        """KIE AI APIでサムネイルを1回生成する（リトライなし）。"""
+        import time
 
-                    if not image_url:
-                        raise ValueError(f"No image URL in completed task: {status_result}")
+        # 肩書を取得
+        person_title = get_person_title(person_name) or ""
 
-                    logger.info(f"KIE AI image URL: {image_url}")
+        # プロンプト作成（文字入り画像生成用）
+        prompt = self._create_thumbnail_prompt_with_text(
+            person_name, person_title, topic, style, thumbnail_copy, reference_image_urls
+        )
+        logger.info(f"KIE AI thumbnail prompt: {prompt}")
 
-                    # 画像をダウンロード
-                    logger.info(f"Downloading thumbnail image from: {image_url}")
-                    img_response = requests.get(image_url, timeout=60)
-                    logger.info(f"Download response status: {img_response.status_code}, size: {len(img_response.content)} bytes")
-                    img_response.raise_for_status()
+        # KIE AI API: タスク作成
+        headers = {
+            "Authorization": f"Bearer {self.nanobanana_api_key}",
+            "Content-Type": "application/json",
+        }
 
-                    # 画像を開いてYouTubeサムネイルサイズにリサイズ
-                    img = Image.open(io.BytesIO(img_response.content))
+        # KIE AI API仕様に合わせたペイロード
+        # nanobanana pro: 高品質サムネイル用（後でPythonで文字追加）
+        input_params = {
+            "prompt": prompt,
+            "aspect_ratio": "16:9",  # YouTubeサムネイル
+            "resolution": "2K",  # 高解像度
+            "output_format": "png",
+        }
 
-                    # RGBAをRGBに変換（JPEG保存用）
-                    if img.mode == "RGBA":
-                        background = Image.new("RGB", img.size, (0, 0, 0))
-                        background.paste(img, mask=img.split()[3])
-                        img = background
+        # 参照画像がある場合は image_input パラメータを追加（配列形式）
+        if reference_image_urls:
+            input_params["image_input"] = reference_image_urls[:8]  # 最大8枚
+            logger.info(f"[IMG2IMG] サムネイル用参照画像を使用: {len(reference_image_urls)}枚")
 
-                    # 1280x720にリサイズ
-                    img = img.resize((1280, 720), Image.Resampling.LANCZOS)
+        payload = {
+            "model": self.thumbnail_model,  # google/nano-banana-pro
+            "input": input_params,
+        }
+        logger.info(f"Using thumbnail model: {self.thumbnail_model}")
 
-                    # 保存
-                    output_path.parent.mkdir(parents=True, exist_ok=True)
-                    img.save(output_path, quality=95)
+        # タスク作成
+        response = requests.post(
+            f"{self.nanobanana_api_url}/jobs/createTask",
+            json=payload,
+            headers=headers,
+            timeout=60,
+        )
+        response.raise_for_status()
+        result = response.json()
 
-                    logger.info(f"Thumbnail saved: {output_path}")
-                    return output_path
+        logger.info(f"KIE AI createTask response: {result}")
 
-                elif state == "fail" or state == "failed" or state == "error":
-                    error_msg = (
-                        status_result.get("data", {}).get("failMsg")
-                        or status_result.get("error")
-                        or status_result.get("message")
-                        or "Unknown error"
+        # KIE AI response format: {"code": 200, "data": {"taskId": "..."}}
+        task_id = (
+            result.get("data", {}).get("taskId")
+            or result.get("data", {}).get("task_id")
+            or result.get("data", {}).get("id")
+            or result.get("id")
+            or result.get("task_id")
+            or result.get("taskId")
+        )
+        if not task_id:
+            raise ValueError(f"No task ID in response: {result}")
+
+        logger.info(f"KIE AI task created: {task_id}")
+
+        # ポーリングでタスク完了を待つ
+        max_attempts = 60  # 最大60回（約5分）
+        for attempt in range(max_attempts):
+            time.sleep(5)  # 5秒待機
+
+            status_response = requests.get(
+                f"{self.nanobanana_api_url}/jobs/recordInfo?taskId={task_id}",
+                headers=headers,
+                timeout=30,
+            )
+            status_response.raise_for_status()
+            status_result = status_response.json()
+
+            # KIE AI uses "state" not "status"
+            state = status_result.get("data", {}).get("state")
+            logger.info(f"Task {task_id} state: {state} (attempt {attempt + 1}/{max_attempts})")
+            if attempt == 0:  # 最初の1回だけ全レスポンスをログ
+                logger.info(f"KIE AI status response: {status_result}")
+
+            if state == "success":
+                # KIE AI: resultJsonをパースしてresultUrlsを取得
+                import json
+
+                result_json_str = status_result.get("data", {}).get("resultJson")
+                if result_json_str:
+                    try:
+                        result_json = json.loads(result_json_str)
+                        result_urls = result_json.get("resultUrls", [])
+                        image_url = result_urls[0] if result_urls else None
+                        logger.info(f"Parsed resultJson, got image_url: {image_url}")
+                    except (json.JSONDecodeError, IndexError, TypeError) as e:
+                        logger.error(f"Failed to parse resultJson: {e}")
+                        image_url = None
+                else:
+                    # フォールバック: 他のフォーマットも試す
+                    image_url = (
+                        status_result.get("result", {}).get("url")
+                        or status_result.get("output", {}).get("url")
+                        or status_result.get("data", {}).get("result", {}).get("url")
+                        or status_result.get("data", {}).get("output", {}).get("url")
+                        or status_result.get("image_url")
+                        or status_result.get("url")
                     )
-                    raise ValueError(f"Task failed: {error_msg}")
 
-            raise TimeoutError(f"Task {task_id} did not complete within {max_attempts * 5} seconds")
+                if not image_url:
+                    raise ValueError(f"No image URL in completed task: {status_result}")
 
-        except Exception as e:
-            logger.error(f"KIE AI generation failed: {e}")
-            # OpenAI APIは使わないので、フォールバックせずエラーを出す
-            raise RuntimeError(f"Thumbnail generation failed with KIE AI: {e}") from e
+                logger.info(f"KIE AI image URL: {image_url}")
+
+                # 画像をダウンロード
+                logger.info(f"Downloading thumbnail image from: {image_url}")
+                img_response = requests.get(image_url, timeout=60)
+                logger.info(f"Download response status: {img_response.status_code}, size: {len(img_response.content)} bytes")
+                img_response.raise_for_status()
+
+                # 画像を開いてYouTubeサムネイルサイズにリサイズ
+                img = Image.open(io.BytesIO(img_response.content))
+
+                # RGBAをRGBに変換（JPEG保存用）
+                if img.mode == "RGBA":
+                    background = Image.new("RGB", img.size, (0, 0, 0))
+                    background.paste(img, mask=img.split()[3])
+                    img = background
+
+                # 1280x720にリサイズ
+                img = img.resize((1280, 720), Image.Resampling.LANCZOS)
+
+                # 保存
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                img.save(output_path, quality=95)
+
+                logger.info(f"Thumbnail saved: {output_path}")
+                return output_path
+
+            elif state == "fail" or state == "failed" or state == "error":
+                error_msg = (
+                    status_result.get("data", {}).get("failMsg")
+                    or status_result.get("error")
+                    or status_result.get("message")
+                    or "Unknown error"
+                )
+                raise ValueError(f"Task failed: {error_msg}")
+
+        raise TimeoutError(f"Task {task_id} did not complete within {max_attempts * 5} seconds")
 
     async def _generate_with_dalle(
         self, person_name: str, topic: str, output_path: Path, style: str, quote: str | None = None
@@ -316,6 +354,7 @@ class ThumbnailGenerator:
         topic: str,
         style: str,
         thumbnail_copy: dict | None = None,
+        reference_image_urls: list[str] | None = None,
     ) -> str:
         """
         Create a prompt for thumbnail generation WITH TEXT.
@@ -330,6 +369,16 @@ class ThumbnailGenerator:
             # フォールバック
             main_copy = "必見"
             sub_copy = topic[:15] if topic else ""
+
+        # 参照画像がある場合はプロンプトを調整
+        if reference_image_urls:
+            person_description = (
+                f"IMPORTANT: Generate the SAME PERSON shown in reference images. "
+                f"This is {person_name}. Maintain exact facial features, face shape, "
+                f"and distinctive characteristics from the reference photos."
+            )
+        else:
+            person_description = f"PERSON: {get_person_appearance(person_name)}, confident expression, looking at camera"
 
         # プロンプト構築
         prompt = f"""YouTube thumbnail design.
@@ -352,7 +401,7 @@ STYLE:
 - Eye-catching, click-worthy design
 - High contrast between text and background
 
-PERSON: {get_person_appearance(person_name)}, confident expression, looking at camera
+{person_description}
 
 IMPORTANT: The Japanese text must be clearly readable and prominent."""
 

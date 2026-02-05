@@ -25,8 +25,9 @@ from app.services.comment_generator import CommentGenerator
 from app.services.description_generator import DescriptionGenerator
 from app.utils.file_manager import FileManager
 from app.utils.logger import logger, log_group, log_group_end
-from app.utils.person_titles import get_person_appearance
+from app.utils.person_titles import get_person_appearance, register_person_info
 from app.utils.voicevox_launcher import launcher as voicevox_launcher
+from app.services.person_info_fetcher import PersonInfoFetcher
 import re
 
 
@@ -49,12 +50,12 @@ def remove_stage_directions(text: str) -> str:
     return cleaned_text.strip()
 
 
-def calculate_next_publish_time(target_hour: int = 18) -> datetime:
+def calculate_next_publish_time(target_hour: int = 21) -> datetime:
     """
     Calculate next publish time at specified hour in JST (UTC+9).
 
     Args:
-        target_hour: Target hour in JST (0-23). Default is 18 (6 PM JST).
+        target_hour: Target hour in JST (0-23). Default is 21 (9 PM JST).
 
     Returns:
         Next publish datetime in UTC (for YouTube API).
@@ -102,6 +103,7 @@ class VideoGenerationOrchestrator:
         self.youtube_uploader = YouTubeUploader()
         self.comment_generator = CommentGenerator()
         self.description_generator = DescriptionGenerator()
+        self.person_info_fetcher = PersonInfoFetcher()
 
     async def generate_complete_video(
         self, config: GenerationConfig
@@ -152,6 +154,9 @@ class VideoGenerationOrchestrator:
             )
 
             log_group("Step 2/5: 画像生成")
+            # 参照画像URLを保持（サムネイル生成でも使用）
+            reference_image_urls: list[str] = []
+
             if settings.skip_image_generation:
                 logger.info("Skipping image generation (using existing images)")
                 if not image_path.exists():
@@ -161,6 +166,31 @@ class VideoGenerationOrchestrator:
             else:
                 logger.info(f"画像生成を開始します: {config.person_name}")
 
+                # AIで人物の外見情報を取得・登録（未登録の人物の場合に備える）
+                try:
+                    person_info = await self.person_info_fetcher.get_person_info(config.person_name)
+                    if person_info.get("appearance"):
+                        register_person_info(
+                            person_name=config.person_name,
+                            title=person_info.get("title"),
+                            quote=person_info.get("famous_quote"),
+                            appearance=person_info.get("appearance"),
+                        )
+                        logger.info(f"[OK] 人物情報を登録: {config.person_name}")
+                except Exception as e:
+                    logger.warning(f"人物情報の取得に失敗（デフォルト使用）: {e}")
+
+                # Wikipedia/ネットから参照画像URLを取得（img2img用）
+                try:
+                    reference_image_urls = await self.person_info_fetcher.get_person_image_urls(
+                        config.person_name, max_images=2
+                    )
+                    if reference_image_urls:
+                        logger.info(f"[OK] 参照画像を{len(reference_image_urls)}枚取得しました")
+                except Exception as e:
+                    logger.warning(f"参照画像の取得に失敗（プロンプトのみで生成）: {e}")
+                    reference_image_urls = []
+
                 # 人物の外見描写を取得（年齢・特徴を含む）
                 appearance = get_person_appearance(config.person_name)
                 person_description = f"Professional portrait of {config.person_name}, {appearance}"
@@ -169,6 +199,7 @@ class VideoGenerationOrchestrator:
                     person_name=config.person_name,
                     person_description=person_description,
                     output_path=image_path,
+                    reference_image_urls=reference_image_urls if reference_image_urls else None,
                 )
 
                 logger.info(f"[OK] 画像生成が完了しました: {image_path}")
@@ -265,6 +296,18 @@ class VideoGenerationOrchestrator:
 
                 thumbnail_path = self.file_manager.get_thumbnail_path(project)
 
+                # 参照画像URLがまだ取得されていない場合は取得（画像生成をスキップした場合など）
+                if not reference_image_urls:
+                    try:
+                        reference_image_urls = await self.person_info_fetcher.get_person_image_urls(
+                            config.person_name, max_images=2
+                        )
+                        if reference_image_urls:
+                            logger.info(f"[OK] サムネイル用参照画像を{len(reference_image_urls)}枚取得しました")
+                    except Exception as e:
+                        logger.warning(f"参照画像の取得に失敗（プロンプトのみで生成）: {e}")
+                        reference_image_urls = []
+
                 # サムネイル用の名言を抽出
                 catchphrase = self.description_generator.extract_catchphrase(script)
                 logger.info(f"Extracted catchphrase for thumbnail: {catchphrase}")
@@ -284,6 +327,7 @@ class VideoGenerationOrchestrator:
                     style="professional",
                     quote=catchphrase,
                     thumbnail_copy=thumbnail_copy,
+                    reference_image_urls=reference_image_urls if reference_image_urls else None,
                 )
 
                 project.thumbnail_path = thumbnail_path
@@ -298,8 +342,8 @@ class VideoGenerationOrchestrator:
             if config.upload_to_youtube:
                 log_group("Step 6/6: YouTubeアップロード")
 
-                # Calculate scheduled publish time (next 18:00 JST)
-                publish_time = calculate_next_publish_time(target_hour=18)
+                # Calculate scheduled publish time (next 21:00 JST)
+                publish_time = calculate_next_publish_time(target_hour=21)
 
                 # Prepare metadata (subtitles を使って正確なタイムスタンプを生成)
                 video_metadata = VideoMetadata(
@@ -313,7 +357,7 @@ class VideoGenerationOrchestrator:
                         "AI時代",
                     ],
                     privacy_status=config.youtube_privacy,
-                    publish_at=publish_time,  # Schedule for next 18:00 JST
+                    publish_at=publish_time,  # Schedule for next 21:00 JST
                 )
 
                 video_id = await self.youtube_uploader.upload_video(
@@ -426,6 +470,20 @@ class VideoGenerationOrchestrator:
             else:
                 logger.info("Step 1/5: Generating images...")
                 logger.info(f"[INFO] 画像生成を開始します: {config.person_name}")
+
+                # AIで人物の外見情報を取得・登録（未登録の人物の場合に備える）
+                try:
+                    person_info = await self.person_info_fetcher.get_person_info(config.person_name)
+                    if person_info.get("appearance"):
+                        register_person_info(
+                            person_name=config.person_name,
+                            title=person_info.get("title"),
+                            quote=person_info.get("famous_quote"),
+                            appearance=person_info.get("appearance"),
+                        )
+                        logger.info(f"[OK] 人物情報を登録: {config.person_name}")
+                except Exception as e:
+                    logger.warning(f"人物情報の取得に失敗（デフォルト使用）: {e}")
 
                 # 人物の外見描写を取得（年齢・特徴を含む）
                 appearance = get_person_appearance(config.person_name)
@@ -573,8 +631,8 @@ class VideoGenerationOrchestrator:
             if config.upload_to_youtube:
                 logger.info("Step 5/5: Uploading to YouTube...")
 
-                # Calculate scheduled publish time (next 18:00 JST)
-                publish_time = calculate_next_publish_time(target_hour=18)
+                # Calculate scheduled publish time (next 21:00 JST)
+                publish_time = calculate_next_publish_time(target_hour=21)
 
                 video_metadata = VideoMetadata(
                     title=f"{config.person_name}の教え - {config.topic}",
@@ -587,7 +645,7 @@ class VideoGenerationOrchestrator:
                         "AI生成",
                     ],
                     privacy_status=config.youtube_privacy,
-                    publish_at=publish_time,  # Schedule for next 18:00 JST
+                    publish_at=publish_time,  # Schedule for next 21:00 JST
                 )
 
                 video_id = await self.youtube_uploader.upload_video(

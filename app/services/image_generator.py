@@ -32,6 +32,7 @@ class ImageGenerator:
         person_description: str,
         output_path: Path,
         background_color: str | None = None,
+        reference_image_urls: list[str] | None = None,
     ) -> Path:
         """
         Generate a slide image featuring a person.
@@ -41,6 +42,7 @@ class ImageGenerator:
             person_description: Description for image generation
             output_path: Where to save the generated image
             background_color: Background color hex code
+            reference_image_urls: 参照画像のURLリスト（img2img用）
 
         Returns:
             Path to generated image file
@@ -57,12 +59,14 @@ class ImageGenerator:
 
         logger.info(f"[START] 画像生成を開始します: '{person_name}'")
         logger.info(f"  出力先: {output_path}")
+        if reference_image_urls:
+            logger.info(f"  参照画像: {len(reference_image_urls)}枚")
 
         # Method 1: Generate AI portrait with KIEAI (優先)
         if settings.use_kieai and self.kieai_api_key:
             logger.info("[INFO] KIEAI APIを使用して画像を生成します")
             portrait_path = await self._generate_portrait_with_kieai(
-                person_name, person_description
+                person_name, person_description, reference_image_urls
             )
         # Method 2: Generate AI portrait with DALL-E
         elif settings.use_dalle and self.openai_client:
@@ -88,22 +92,39 @@ class ImageGenerator:
         return slide_path
 
     async def _generate_portrait_with_kieai(
-        self, person_name: str, person_description: str
+        self, person_name: str, person_description: str,
+        reference_image_urls: list[str] | None = None
     ) -> Path:
         """Generate a portrait using KIEAI nanobanana API (非同期ジョブ形式)."""
         try:
-            # プロンプト: 背景暗め、顔アップ、文字なし、人物は右半分に配置
-            prompt = (
-                f"Professional portrait close-up of {person_name}. "
-                f"{person_description}. "
-                f"Dark background, dramatic lighting, "
-                f"face and upper body visible, "
-                f"person positioned on the right half of the image, "
-                f"left half is empty dark background, "
-                f"no text, no letters, no words, "
-                f"high quality, realistic portrait photography style, "
-                f"suitable for educational content."
-            )
+            # 参照画像がある場合はプロンプトを調整
+            if reference_image_urls:
+                prompt = (
+                    f"Professional portrait of the same person shown in reference images. "
+                    f"This is {person_name}. "
+                    f"Maintain exact facial features, face shape, and distinctive characteristics from the reference. "
+                    f"{person_description}. "
+                    f"Dark background, dramatic lighting, "
+                    f"face and upper body visible, "
+                    f"person positioned on the right half of the image, "
+                    f"left half is empty dark background, "
+                    f"no text, no letters, no words, "
+                    f"high quality, realistic portrait photography style."
+                )
+                logger.info(f"[IMG2IMG] 参照画像を使用: {len(reference_image_urls)}枚")
+            else:
+                # プロンプト: 背景暗め、顔アップ、文字なし、人物は右半分に配置
+                prompt = (
+                    f"Professional portrait close-up of {person_name}. "
+                    f"{person_description}. "
+                    f"Dark background, dramatic lighting, "
+                    f"face and upper body visible, "
+                    f"person positioned on the right half of the image, "
+                    f"left half is empty dark background, "
+                    f"no text, no letters, no words, "
+                    f"high quality, realistic portrait photography style, "
+                    f"suitable for educational content."
+                )
 
             logger.debug(f"KIEAI nanobanana prompt: {prompt}")
 
@@ -114,13 +135,19 @@ class ImageGenerator:
             }
 
             # タスクを作成
+            input_params = {
+                "prompt": prompt,
+                "output_format": "png",
+                "image_size": "16:9",  # 動画用のアスペクト比
+            }
+
+            # 参照画像がある場合は img_url パラメータを追加（カンマ区切り）
+            if reference_image_urls:
+                input_params["img_url"] = ",".join(reference_image_urls[:5])  # 最大5枚
+
             payload = {
                 "model": settings.kieai_model,  # "google/nano-banana"
-                "input": {
-                    "prompt": prompt,
-                    "output_format": "png",
-                    "image_size": "16:9",  # 動画用のアスペクト比
-                },
+                "input": input_params,
             }
 
             logger.info("[API] KIEAI nanobanana APIにリクエストを送信します...")

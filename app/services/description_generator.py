@@ -33,12 +33,14 @@ class DescriptionGenerator:
         video_duration_seconds: float,
         subtitles: list[dict] | None = None,
         dynamic_hashtags: list[str] | None = None,
+        related_videos: list[dict] | None = None,
     ) -> str:
         logger.info("Generating video description")
 
         opening_hook = self._generate_opening_hook(person_name, topic, script)
         summary = self._generate_summary(person_name, topic, script, video_duration_seconds)
         chapters = self._generate_chapters(script, video_duration_seconds, subtitles)
+        related_section = self._generate_related_videos_section(related_videos)
         narration_info = "■ナレーション\nVOICEVOX：青山龍星"
         hashtags = self._generate_hashtags(person_name, topic, dynamic_hashtags)
 
@@ -46,7 +48,15 @@ class DescriptionGenerator:
             f"{opening_hook}\n\n"
             f"{summary}\n\n"
             f"【目次】\n{chapters}\n\n"
+        )
+
+        # 関連動画セクションがあれば追加
+        if related_section:
+            description += f"{related_section}\n\n"
+
+        description += (
             f"{narration_info}\n\n"
+            f"※画像はイメージです\n\n"
             f"【ハッシュタグ】\n{hashtags}"
         )
 
@@ -167,6 +177,42 @@ class DescriptionGenerator:
             current_time += section.duration_seconds * scale
 
         return "\n".join(chapters)
+
+    def _generate_related_videos_section(
+        self,
+        related_videos: list[dict] | None,
+    ) -> str:
+        """
+        関連動画・おすすめ動画セクションを生成する。
+
+        Args:
+            related_videos: 関連動画リスト [{person_name, theme, youtube_url}, ...]
+
+        Returns:
+            関連動画セクションの文字列（動画がない場合は空文字列）
+        """
+        if not related_videos:
+            return ""
+
+        lines = ["【おすすめ動画】"]
+        for video in related_videos[:5]:  # 最大5本
+            person = video.get("person_name", "")
+            theme = video.get("theme", "")
+            url = video.get("youtube_url", "")
+
+            if person and url:
+                # タイトルを生成
+                if theme:
+                    title = f"▶ {person}の哲学 - {theme}"
+                else:
+                    title = f"▶ {person}の教え"
+                lines.append(f"{title}\n{url}")
+
+        if len(lines) <= 1:
+            return ""
+
+        logger.info(f"✅ 関連動画セクションを生成: {len(lines) - 1}本")
+        return "\n".join(lines)
 
     def _generate_hashtags(
         self,

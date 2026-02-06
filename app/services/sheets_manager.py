@@ -1159,3 +1159,69 @@ class SheetsManager:
         except Exception as e:
             logger.warning(f"コンテンツ戦略の読み込みに失敗: {e}")
             return []
+
+    async def get_published_videos(
+        self,
+        exclude_person: str | None = None,
+        limit: int = 10,
+        sheet_name: str = "動画制作ログ",
+    ) -> list[dict[str, str]]:
+        """
+        公開済み動画のリストを取得する（説明文の関連動画リンク用）
+
+        Args:
+            exclude_person: 除外する人物名（現在の動画の人物）
+            limit: 取得する最大件数
+            sheet_name: シート名
+
+        Returns:
+            動画情報のリスト [{person_name, theme, youtube_url}, ...]
+        """
+        if not self.service:
+            await self.authenticate()
+
+        try:
+            # A:G列を取得（タイムスタンプ、人物名、テーマ、動画長、生成時間、プロジェクトパス、YouTubeURL）
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .get(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"{sheet_name}!A:G",
+                )
+                .execute()
+            )
+
+            values = result.get("values", [])
+            if len(values) <= 1:
+                return []
+
+            videos = []
+            # 新しい順に取得するため逆順
+            for row in reversed(values[1:]):
+                if len(row) >= 7 and row[6]:  # YouTubeURLがある
+                    youtube_url = row[6]
+                    person_name = row[1] if len(row) > 1 else ""
+                    theme = row[2] if len(row) > 2 else ""
+
+                    # 除外条件
+                    if exclude_person and person_name == exclude_person:
+                        continue
+
+                    # URLが有効か確認
+                    if "youtube.com" in youtube_url or "youtu.be" in youtube_url:
+                        videos.append({
+                            "person_name": person_name,
+                            "theme": theme,
+                            "youtube_url": youtube_url,
+                        })
+
+                    if len(videos) >= limit:
+                        break
+
+            logger.info(f"公開済み動画を取得: {len(videos)}件")
+            return videos
+
+        except Exception as e:
+            logger.warning(f"公開済み動画の取得に失敗: {e}")
+            return []

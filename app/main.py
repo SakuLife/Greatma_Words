@@ -345,10 +345,24 @@ class VideoGenerationOrchestrator:
                 # Calculate scheduled publish time (next 21:00 JST)
                 publish_time = calculate_next_publish_time(target_hour=21)
 
+                # 関連動画リストを取得（説明文の内部リンク用）
+                related_videos: list[dict] = []
+                try:
+                    from app.services.sheets_manager import SheetsManager
+                    sheets = SheetsManager()
+                    related_videos = await sheets.get_published_videos(
+                        exclude_person=config.person_name,
+                        limit=5,
+                    )
+                    if related_videos:
+                        logger.info(f"[OK] 関連動画を{len(related_videos)}件取得しました")
+                except Exception as e:
+                    logger.warning(f"関連動画の取得に失敗（スキップ）: {e}")
+
                 # Prepare metadata (subtitles を使って正確なタイムスタンプを生成)
                 video_metadata = VideoMetadata(
                     title=f"{config.person_name}の哲学 - {config.topic}",
-                    description=self._generate_video_description(script, config, subtitles),
+                    description=self._generate_video_description(script, config, subtitles, related_videos),
                     tags=[
                         config.person_name,
                         "哲学",
@@ -634,9 +648,23 @@ class VideoGenerationOrchestrator:
                 # Calculate scheduled publish time (next 21:00 JST)
                 publish_time = calculate_next_publish_time(target_hour=21)
 
+                # 関連動画リストを取得（説明文の内部リンク用）
+                related_videos: list[dict] = []
+                try:
+                    from app.services.sheets_manager import SheetsManager
+                    sheets = SheetsManager()
+                    related_videos = await sheets.get_published_videos(
+                        exclude_person=config.person_name,
+                        limit=5,
+                    )
+                    if related_videos:
+                        logger.info(f"[OK] 関連動画を{len(related_videos)}件取得しました")
+                except Exception as e:
+                    logger.warning(f"関連動画の取得に失敗（スキップ）: {e}")
+
                 video_metadata = VideoMetadata(
                     title=f"{config.person_name}の教え - {config.topic}",
-                    description=self._generate_video_description(script, config, subtitles),
+                    description=self._generate_video_description(script, config, subtitles, related_videos),
                     tags=[
                         config.person_name,
                         "教養",
@@ -723,6 +751,7 @@ class VideoGenerationOrchestrator:
         script,
         config: GenerationConfig,
         subtitles: list[dict] | None = None,
+        related_videos: list[dict] | None = None,
     ) -> str:
         """Generate YouTube video description from script."""
         # 音声ファイルから動画の長さを取得
@@ -741,6 +770,7 @@ class VideoGenerationOrchestrator:
             topic=config.topic,
             video_duration_seconds=video_duration_seconds,
             subtitles=subtitles,
+            related_videos=related_videos,
         )
 
         return description

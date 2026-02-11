@@ -15,9 +15,8 @@ on:
 
 jobs:
   generate:
-    # GitHub-hosted runner - runs on GitHub's servers, no local PC needed
-    # Docker is pre-installed, VOICEVOX will start automatically
-    runs-on: ubuntu-latest
+    # Self-hosted Linux runner
+    runs-on: self-hosted
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
@@ -161,6 +160,13 @@ jobs:
           done
           echo "VOICEVOX API did not become ready within 60 seconds"
           exit 1
+
+      - name: Update video stats (views, likes, comments)
+        continue-on-error: true
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: python update_video_stats.py
 
       - name: Retry pending comments (from previous scheduled videos)
         continue-on-error: true

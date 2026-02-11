@@ -87,6 +87,17 @@ PERSON_APPEARANCES = {
     # 科学者
     "アルベルト・アインシュタイン": "elderly man in his 70s, iconic wild white hair, mustache, kind wise eyes, wearing a casual sweater or jacket",
     "Albert Einstein": "elderly man in his 70s, iconic wild white hair, mustache, kind wise eyes, wearing a casual sweater or jacket",
+    # 日本の歴史的人物
+    "渋沢栄一": "elderly Japanese man in his 80s, Meiji-era businessman, white beard, traditional Japanese formal attire or Western suit, dignified wise expression, founding father of Japanese capitalism",
+    "福沢諭吉": "middle-aged Japanese man in his 60s, Meiji-era intellectual, traditional Japanese clothing or Western suit, short hair, intellectual thoughtful expression, educator and writer",
+    "本田宗一郎": "elderly Japanese man in his 70s, founder of Honda, white hair, energetic passionate expression, wearing work clothes or casual attire, mechanic and entrepreneur",
+    "盛田昭夫": "elderly Japanese man in his 70s, Sony co-founder, glasses, confident businessman appearance, wearing dark suit, visionary entrepreneur",
+    "豊田喜一郎": "middle-aged Japanese man in his 50s, Toyota founder, glasses, serious determined expression, wearing suit, automotive pioneer",
+    "松下幸之助": "elderly Japanese man in his 80s, Panasonic founder, white hair, gentle wise smile, wearing dark suit, management philosopher",
+    "西郷隆盛": "middle-aged Japanese samurai in his 40s, Meiji Restoration leader, large build, thick eyebrows, traditional samurai clothing, strong determined expression",
+    "坂本龍馬": "young Japanese samurai in his early 30s, late Edo period revolutionary, traditional Japanese clothing with Western influences, energetic forward-thinking expression",
+    "織田信長": "middle-aged Japanese warlord in his 40s, Sengoku period daimyo, traditional samurai armor or formal attire, sharp piercing eyes, bold ambitious expression",
+    "徳川家康": "elderly Japanese shogun in his 60s, founder of Tokugawa shogunate, traditional formal Japanese attire, calm patient wise expression",
 }
 
 

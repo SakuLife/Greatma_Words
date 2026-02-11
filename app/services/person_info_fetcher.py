@@ -3,13 +3,22 @@ Person information fetcher using AI.
 Dynamically fetches person titles, quotes, and background information.
 """
 
+import io
 import json
 
 import google.generativeai as genai
 import requests
+from PIL import Image
 
 from app.config import settings
 from app.utils.logger import logger
+
+# DuckDuckGo画像検索（無料・APIキー不要）
+try:
+    from duckduckgo_search import DDGS
+    DDGS_AVAILABLE = True
+except ImportError:
+    DDGS_AVAILABLE = False
 
 
 class PersonInfoFetcher:
@@ -129,18 +138,51 @@ class PersonInfoFetcher:
 
     async def get_person_image_urls(self, person_name: str, max_images: int = 2) -> list[str]:
         """
-        Wikipedia/Wikimedia Commonsから人物の画像URLを取得する。
+        人物の参照画像URLを取得する。
+        優先順: SerpAPI Google Images（+Gemini Vision本人確認） → Wikipedia → 空リスト
 
         Args:
             person_name: 人物名
             max_images: 取得する画像の最大数
 
         Returns:
-            画像URLのリスト
+            画像URLのリスト（KIE AIからアクセス可能なもの優先）
         """
-        image_urls = []
+        image_urls: list[str] = []
 
-        # 日本語Wikipediaと英語Wikipediaの両方を試す
+        # === Phase 1: Web画像検索 + Gemini Vision検証 ===
+        try:
+            candidates = self._search_web_images(person_name, max_candidates=max_images * 4)
+            if candidates:
+                logger.info(f"[ImageSearch] {len(candidates)}件の候補画像をAI検証中...")
+                for candidate in candidates:
+                    if len(image_urls) >= max_images:
+                        break
+
+                    url = candidate["url"]
+
+                    # URLアクセス可能性チェック
+                    if not self._check_url_accessible(url):
+                        logger.debug(f"URL not accessible: {url[:80]}")
+                        continue
+
+                    # Gemini Visionで本人確認
+                    if self._verify_person_image(url, person_name):
+                        image_urls.append(url)
+                        logger.info(f"[OK] 検証済み画像: {candidate.get('source', '不明')} - {url[:80]}")
+
+                if image_urls:
+                    logger.info(
+                        f"[OK] {person_name}の検索画像を{len(image_urls)}枚取得しました（AI検証済み）"
+                    )
+                    return image_urls
+                else:
+                    logger.info("[ImageSearch] 検証済み画像なし → Wikipediaフォールバック")
+
+        except Exception as e:
+            logger.warning(f"Google Images search failed, falling back to Wikipedia: {e}")
+
+        # === Phase 2: Wikipedia フォールバック（既存ロジック） ===
         wiki_configs = [
             {"lang": "ja", "name": person_name},
             {"lang": "en", "name": self._get_english_name(person_name)},
@@ -158,11 +200,147 @@ class PersonInfoFetcher:
                         break
 
         if image_urls:
-            logger.info(f"[OK] {person_name}の参照画像を{len(image_urls)}枚取得しました")
+            logger.info(f"[OK] {person_name}の参照画像を{len(image_urls)}枚取得しました（Wikipedia）")
         else:
             logger.warning(f"[WARN] {person_name}の参照画像が見つかりませんでした")
 
         return image_urls
+
+    def _search_web_images(self, person_name: str, max_candidates: int = 8) -> list[dict]:
+        """
+        DuckDuckGo画像検索で人物画像の候補を取得する（無料・APIキー不要）。
+
+        Args:
+            person_name: 人物名
+            max_candidates: 取得する候補の最大数
+
+        Returns:
+            [{"url": str, "title": str, "source": str}, ...] のリスト
+        """
+        if not DDGS_AVAILABLE:
+            logger.debug("duckduckgo-search is not installed, skipping image search")
+            return []
+
+        candidates: list[dict] = []
+        english_name = self._get_english_name(person_name)
+
+        # 英語名で検索（高品質な結果が多い）
+        search_queries = [
+            f"{english_name} portrait photo",
+        ]
+        # 英語名と日本語名が同じ場合は日本語クエリも追加
+        if english_name == person_name:
+            search_queries.append(f"{person_name} 肖像 写真")
+
+        for query in search_queries:
+            if len(candidates) >= max_candidates:
+                break
+
+            try:
+                with DDGS() as ddgs:
+                    results = list(ddgs.images(
+                        keywords=query,
+                        max_results=10,
+                        safesearch="moderate",
+                    ))
+
+                for img in results:
+                    if len(candidates) >= max_candidates:
+                        break
+
+                    url = img.get("image", "")
+                    if not url:
+                        continue
+
+                    # フィルタリング
+                    url_lower = url.lower()
+                    if any(ext in url_lower for ext in [".svg", ".gif", ".webp"]):
+                        continue
+                    # Wikipedia/WikimediaはKIE AIから403になるので除外
+                    if "wikipedia.org" in url_lower or "wikimedia.org" in url_lower:
+                        continue
+
+                    candidates.append({
+                        "url": url,
+                        "title": img.get("title", ""),
+                        "source": img.get("url", ""),
+                    })
+
+                logger.info(f"[ImageSearch] '{query}' → {len(candidates)}件の候補")
+
+            except Exception as e:
+                logger.warning(f"Image search failed for '{query}': {e}")
+                continue
+
+        return candidates
+
+    def _verify_person_image(self, image_url: str, person_name: str) -> bool:
+        """
+        Gemini Visionで画像が指定された人物かどうかを検証する。
+
+        Args:
+            image_url: 検証する画像のURL
+            person_name: 期待される人物名
+
+        Returns:
+            True: 正しい人物の画像, False: 違う人物/判定不能
+        """
+        if not self.model:
+            return True  # Gemini未設定の場合はスキップ（パスさせる）
+
+        try:
+            # 画像をダウンロード
+            response = requests.get(image_url, timeout=10, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            response.raise_for_status()
+
+            content_type = response.headers.get("Content-Type", "")
+            if "image" not in content_type and not image_url.lower().endswith(
+                (".jpg", ".jpeg", ".png")
+            ):
+                return False
+
+            img = Image.open(io.BytesIO(response.content))
+
+            # 小さすぎる画像は除外
+            if img.width < 100 or img.height < 100:
+                return False
+
+            # Gemini 2.0 Flash Vision（高速・安価）で検証
+            english_name = self._get_english_name(person_name)
+            vision_model = genai.GenerativeModel("gemini-2.0-flash")
+
+            prompt = (
+                f"Is the person in this image {english_name} ({person_name})? "
+                f"Answer with ONLY 'YES' or 'NO'. "
+                f"If you are not sure, answer 'NO'. "
+                f"If there is no person in the image, answer 'NO'."
+            )
+
+            result = vision_model.generate_content([prompt, img])
+            answer = result.text.strip().upper()
+
+            is_correct = "YES" in answer
+            logger.debug(
+                f"Gemini Vision: {person_name} → {'MATCH' if is_correct else 'NO MATCH'} ({answer})"
+            )
+            return is_correct
+
+        except Exception as e:
+            logger.debug(f"Image verification failed for {image_url[:60]}: {e}")
+            return False
+
+    def _check_url_accessible(self, url: str) -> bool:
+        """HEADリクエストでURLがアクセス可能か確認する。"""
+        try:
+            response = requests.head(
+                url, timeout=5, allow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; ImageBot/1.0)"},
+            )
+            return response.status_code == 200
+        except Exception:
+            return False
 
     def _fetch_wikipedia_images(self, person_name: str, lang: str = "ja") -> list[str]:
         """

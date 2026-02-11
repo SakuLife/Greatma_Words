@@ -108,6 +108,10 @@ class SheetsManager:
         project_path: str | None = None,
         auto_comment_status: str = "",
         auto_comment_text: str = "",
+        opening_text: str = "",
+        action_plan: str = "",
+        hook_strategy: str = "",
+        structure_pattern: str = "",
         sheet_name: str = "動画制作ログ",
     ) -> bool:
         """
@@ -123,6 +127,10 @@ class SheetsManager:
             project_path: Project directory path (optional)
             auto_comment_status: 自動コメント投稿結果（"成功" / "失敗" / ""）
             auto_comment_text: 投稿したコメント本文
+            opening_text: 冒頭テキスト（次回の重複回避用）
+            action_plan: アクションプラン（現代への応用セクションの要約）
+            hook_strategy: 使用したフック戦略名
+            structure_pattern: 使用した構成パターン名
             sheet_name: Name of the sheet to write to
 
         Returns:
@@ -162,10 +170,14 @@ class SheetsManager:
                 drive_url or "",
                 auto_comment_status,
                 auto_comment_text[:100] if auto_comment_text else "",  # 長すぎる場合は100文字で切る
+                opening_text[:200] if opening_text else "",  # 冒頭テキスト（次回の重複回避用）
+                action_plan[:200] if action_plan else "",  # アクションプラン
+                hook_strategy,  # フック戦略名
+                structure_pattern,  # 構成パターン名
             ]
 
             # Append row to sheet
-            range_name = f"{sheet_name}!A:M"
+            range_name = f"{sheet_name}!A:Q"
 
             body = {"values": [row_data]}
 
@@ -501,7 +513,7 @@ class SheetsManager:
                     youtube_url = row[6] if len(row) > 6 else ""
                     if youtube_url:
                         # URLからvideo_idを抽出
-                        video_id = youtube_url.split("v=")[-1] if "v=" in youtube_url else ""
+                        video_id = youtube_url.split("v=")[-1].split("&")[0] if "v=" in youtube_url else ""
                         if video_id:
                             pending.append({
                                 "row_index": i,
@@ -552,6 +564,159 @@ class SheetsManager:
         except Exception as e:
             logger.error(f"コメントステータス更新に失敗: {e}")
             return False
+
+    async def update_video_stats(
+        self,
+        row_index: int,
+        view_count: int,
+        like_count: int,
+        comment_count: int,
+        sheet_name: str = "動画制作ログ",
+    ) -> bool:
+        """
+        動画の視聴回数・いいね数・コメント数を更新する（HIJ列）。
+
+        Args:
+            row_index: 行番号（1-indexed）
+            view_count: 視聴回数
+            like_count: いいね数
+            comment_count: コメント数
+            sheet_name: シート名
+
+        Returns:
+            成功したらTrue
+        """
+        if not self.service:
+            await self.authenticate()
+
+        try:
+            # H列=8列目, I列=9列目, J列=10列目
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!H{row_index}:J{row_index}",
+                valueInputOption="RAW",
+                body={"values": [[view_count, like_count, comment_count]]},
+            ).execute()
+
+            logger.info(
+                f"動画統計を更新: 行{row_index} "
+                f"(再生{view_count}, いいね{like_count}, コメント{comment_count})"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"動画統計の更新に失敗: {e}")
+            return False
+
+    async def get_videos_for_stats_update(
+        self,
+        sheet_name: str = "動画制作ログ",
+    ) -> list[dict[str, Any]]:
+        """
+        統計情報を更新すべき動画のリストを取得する。
+        YouTube URLがあり、HIJ列が空のもの、または全件を返す。
+
+        Args:
+            sheet_name: シート名
+
+        Returns:
+            更新対象の動画リスト [{row_index, video_id, person_name}, ...]
+        """
+        if not self.service:
+            await self.authenticate()
+
+        try:
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .get(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"{sheet_name}!A:J",
+                )
+                .execute()
+            )
+
+            values = result.get("values", [])
+            if len(values) <= 1:
+                return []
+
+            videos = []
+            for i, row in enumerate(values[1:], start=2):  # 1-indexed, skip header
+                if len(row) < 7:
+                    continue
+
+                youtube_url = row[6] if len(row) > 6 else ""
+                if not youtube_url or "youtube.com" not in youtube_url:
+                    continue
+
+                # URLからvideo_idを抽出
+                video_id = ""
+                if "v=" in youtube_url:
+                    video_id = youtube_url.split("v=")[-1].split("&")[0]
+                if not video_id:
+                    continue
+
+                videos.append({
+                    "row_index": i,
+                    "video_id": video_id,
+                    "person_name": row[1] if len(row) > 1 else "",
+                })
+
+            logger.info(f"統計更新対象の動画: {len(videos)}件")
+            return videos
+
+        except Exception as e:
+            logger.error(f"統計更新対象の取得に失敗: {e}")
+            return []
+
+    async def get_previous_openings(
+        self,
+        limit: int = 5,
+        sheet_name: str = "動画制作ログ",
+    ) -> list[str]:
+        """
+        過去の動画の冒頭テキストを取得する（重複回避用）。
+
+        Args:
+            limit: 取得する最大件数
+            sheet_name: シート名
+
+        Returns:
+            冒頭テキストのリスト（新しい順）
+        """
+        if not self.service:
+            await self.authenticate()
+
+        try:
+            # N列（14列目）が冒頭テキスト
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .get(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"{sheet_name}!N:N",
+                )
+                .execute()
+            )
+
+            values = result.get("values", [])
+            if len(values) <= 1:
+                return []
+
+            # ヘッダーをスキップし、空でないものを新しい順に取得
+            openings = []
+            for row in reversed(values[1:]):
+                if row and row[0].strip():
+                    openings.append(row[0].strip())
+                if len(openings) >= limit:
+                    break
+
+            logger.info(f"過去の冒頭テキストを取得: {len(openings)}件")
+            return openings
+
+        except Exception as e:
+            logger.warning(f"過去の冒頭テキスト取得に失敗: {e}")
+            return []
 
     # ========================================
     # 週次分析・A/Bテスト用メソッド

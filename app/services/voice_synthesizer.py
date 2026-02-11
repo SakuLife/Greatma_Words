@@ -146,6 +146,13 @@ KANJI_READINGS: dict[str, str] = {
     "齟齬": "そご",
     "邂逅": "かいこう",
     "逡巡": "しゅんじゅん",
+    # === 人名の誤読防止 ===
+    "藤田田": "ふじたでん",
+    "御手洗": "みたらい",
+    "五十嵐": "いがらし",
+    "長谷川": "はせがわ",
+    "服部": "はっとり",
+    "東海林": "しょうじ",
     # === 投資・ビジネス用語 ===
     "指値": "さしね",
     "老舗": "しにせ",
@@ -396,6 +403,9 @@ class VoiceSynthesizer:
                         )
                     query_data = await response.json()
 
+                # ポーズ長の調整（「・」等の間が長すぎる問題対策）
+                query_data = self._adjust_pause_length(query_data)
+
                 # Step 2: Synthesize audio
                 synthesis_url = f"{self.api_url}/synthesis"
                 params = {"speaker": speaker_id}
@@ -420,6 +430,32 @@ class VoiceSynthesizer:
         except Exception as e:
             logger.error(f"Synthesis error: {e}")
             raise RuntimeError(f"Failed to synthesize audio: {e}") from e
+
+    @staticmethod
+    def _adjust_pause_length(
+        query_data: dict,
+        max_pause: float = 0.25,
+    ) -> dict:
+        """
+        VOICEVOXのポーズ長を調整する。
+        「・」や句読点で生じる長すぎるポーズを短縮する。
+
+        Args:
+            query_data: audio_query APIのレスポンス
+            max_pause: 最大ポーズ長（秒）。デフォルト0.25秒。
+
+        Returns:
+            調整済みのquery_data
+        """
+        for phrase in query_data.get("accent_phrases", []):
+            pause = phrase.get("pause_mora")
+            if pause and pause.get("vowel_length", 0) > max_pause:
+                original = pause["vowel_length"]
+                pause["vowel_length"] = max_pause
+                logger.debug(
+                    f"ポーズ長調整: {original:.3f}秒 → {max_pause:.3f}秒"
+                )
+        return query_data
 
     async def check_connection(self) -> bool:
         """

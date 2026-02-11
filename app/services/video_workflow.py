@@ -24,22 +24,22 @@ from app.utils.file_manager import FileManager
 from app.utils.logger import logger
 
 
-def calculate_next_publish_time(target_hour: int = 18) -> datetime:
+def calculate_next_publish_time(target_hour: int = 21) -> datetime:
     """
     Calculate next publish time at specified hour in JST (UTC+9).
 
     Args:
-        target_hour: Target hour in JST (0-23). Default is 18 (6 PM JST).
+        target_hour: Target hour in JST (0-23). Default is 21 (9 PM JST).
 
     Returns:
         Next publish datetime in UTC (for YouTube API).
 
     Example:
         If current time is 2025-12-28 10:00 JST:
-        - Returns 2025-12-28 18:00 JST = 2025-12-28 09:00 UTC (same day)
+        - Returns 2025-12-28 21:00 JST = 2025-12-28 12:00 UTC (same day)
 
         If current time is 2025-12-28 19:00 JST:
-        - Returns 2025-12-29 18:00 JST = 2025-12-29 09:00 UTC (next day)
+        - Returns 2025-12-28 21:00 JST = 2025-12-28 12:00 UTC (same day)
     """
     # JST is UTC+9
     JST = timezone(timedelta(hours=9))
@@ -117,6 +117,8 @@ class VideoWorkflow:
         upload_to_youtube: bool = True,
         upload_to_drive: bool = True,
         privacy_status: str = "private",
+        hook_strategy: str = "",
+        structure_pattern: str = "",
     ) -> dict[str, Any]:
         """
         Create a complete video from start to finish with all integrations.
@@ -128,6 +130,8 @@ class VideoWorkflow:
             upload_to_youtube: Whether to upload to YouTube
             upload_to_drive: Whether to upload to Google Drive
             privacy_status: YouTube privacy status (public/private/unlisted)
+            hook_strategy: 使用したフック戦略名（スプシ記録用）
+            structure_pattern: 使用した構成パターン名（スプシ記録用）
 
         Returns:
             Dictionary with results including URLs and metadata
@@ -228,11 +232,17 @@ class VideoWorkflow:
                 )
 
             if not settings.skip_thumbnail_generation:
-                thumbnail_file = await self.thumbnail_generator.generate_thumbnail(
-                    person_name=person_name,
-                    theme=theme,
-                    output_path=project_dir / "output" / "thumbnail.jpg",
-                )
+                try:
+                    thumbnail_file = await self.thumbnail_generator.generate_thumbnail(
+                        person_name=person_name,
+                        theme=theme,
+                        output_path=project_dir / "output" / "thumbnail.jpg",
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"サムネイル生成失敗（スキップして続行）: {e}"
+                    )
+                    thumbnail_file = None
             else:
                 logger.info("Skipping thumbnail generation")
                 thumbnail_file = None
@@ -250,8 +260,8 @@ class VideoWorkflow:
                         "動画生成", 6, 6, "YouTubeにアップロード中..."
                     )
 
-                # Calculate scheduled publish time (next 18:00 JST)
-                publish_time = calculate_next_publish_time(target_hour=18)
+                # Calculate scheduled publish time (next 21:00 JST)
+                publish_time = calculate_next_publish_time(target_hour=21)
 
                 metadata = VideoMetadata(
                     title=f"{person_name} - {theme}",
@@ -261,7 +271,7 @@ class VideoWorkflow:
                     tags=[person_name, theme, "教養", "ビジネス", "偉人"],
                     category_id=settings.youtube_default_category,
                     privacy_status=privacy_status,
-                    publish_at=publish_time,  # Schedule for next 18:00 JST
+                    publish_at=publish_time,  # Schedule for next 21:00 JST
                 )
 
                 video_id = await self.youtube_uploader.upload_video(
@@ -274,8 +284,6 @@ class VideoWorkflow:
                     await self.youtube_uploader.set_thumbnail(video_id, thumbnail_file)
 
                 # 自動コメント投稿（台本のCTAに対するお手本コメント）
-                auto_comment_status = ""
-                auto_comment_text = ""
                 if settings.youtube_auto_comment:
                     try:
                         import asyncio
@@ -298,7 +306,7 @@ class VideoWorkflow:
                             )
                     except Exception as e:
                         auto_comment_status = "失敗"
-                        logger.warning(f"Auto-comment failed (non-critical): {e}")
+                        logger.warning(f"Auto-comment failed (non-critical): {e}", exc_info=True)
 
                 if self.discord_notifier:
                     await self.discord_notifier.notify_youtube_uploaded(
@@ -323,6 +331,19 @@ class VideoWorkflow:
             # Step 9: Log to Google Sheets (optional)
             if self.sheets_manager and self.enable_sheets:
                 generation_time = time.time() - start_time
+
+                # 台本から冒頭テキストとアクションプランを抽出
+                opening_text = ""
+                action_plan = ""
+                if script and script.sections:
+                    # 冒頭テキスト: 最初のセクションのnarration先頭
+                    opening_text = script.sections[0].narration[:200] if script.sections[0].narration else ""
+                    # アクションプラン: 「応用」「アクション」「実践」を含むセクション
+                    for section in script.sections:
+                        if any(kw in section.title for kw in ["応用", "アクション", "実践"]):
+                            action_plan = section.narration[:200] if section.narration else ""
+                            break
+
                 await self.sheets_manager.log_video_production(
                     person_name=person_name,
                     theme=theme,
@@ -333,6 +354,10 @@ class VideoWorkflow:
                     project_path=str(project_dir),
                     auto_comment_status=auto_comment_status if upload_to_youtube else "",
                     auto_comment_text=auto_comment_text if upload_to_youtube else "",
+                    opening_text=opening_text,
+                    action_plan=action_plan,
+                    hook_strategy=hook_strategy,
+                    structure_pattern=structure_pattern,
                 )
 
             # Step 10: Send completion notification
@@ -469,6 +494,81 @@ class VideoWorkflow:
             "still_pending": still_pending,
         }
         logger.info(f"保留コメントリトライ完了: {result}")
+        return result
+
+    async def update_all_video_stats(self) -> dict[str, Any]:
+        """
+        全動画のHIJ列（再生数・いいね数・コメント数）を一括更新する。
+
+        YouTube APIで各動画の統計を取得し、スプシに書き込む。
+        GitHub Actionsのスケジュール等から定期実行を想定。
+
+        Returns:
+            結果サマリー辞書
+        """
+        if not self.sheets_manager or not self.enable_sheets:
+            logger.warning("Google Sheets not enabled")
+            return {"updated": 0, "failed": 0, "skipped": 0}
+
+        if not self.youtube_uploader or not self.enable_youtube:
+            logger.warning("YouTube not enabled")
+            return {"updated": 0, "failed": 0, "skipped": 0}
+
+        # YouTube認証
+        if not self.youtube_uploader.youtube_service:
+            await self.youtube_uploader.authenticate()
+
+        # Sheets認証
+        if not self.sheets_manager.service:
+            await self.sheets_manager.authenticate()
+
+        # 更新対象の動画リスト取得
+        videos = await self.sheets_manager.get_videos_for_stats_update()
+        if not videos:
+            logger.info("統計更新対象の動画はありません")
+            return {"updated": 0, "failed": 0, "skipped": 0}
+
+        logger.info(f"統計更新開始: {len(videos)}件")
+
+        updated = 0
+        failed = 0
+        skipped = 0
+
+        for video in videos:
+            video_id = video["video_id"]
+            row_index = video["row_index"]
+
+            try:
+                info = await self.youtube_uploader.get_video_info(video_id)
+                stats = info.get("statistics", {})
+
+                view_count = int(stats.get("viewCount", 0))
+                like_count = int(stats.get("likeCount", 0))
+                comment_count = int(stats.get("commentCount", 0))
+
+                await self.sheets_manager.update_video_stats(
+                    row_index=row_index,
+                    view_count=view_count,
+                    like_count=like_count,
+                    comment_count=comment_count,
+                )
+                updated += 1
+                logger.info(
+                    f"統計更新: {video.get('person_name', '')} "
+                    f"(再生{view_count}, いいね{like_count}, コメント{comment_count})"
+                )
+
+            except Exception as e:
+                error_str = str(e)
+                if "Video not found" in error_str:
+                    skipped += 1
+                    logger.debug(f"動画が見つかりません（削除済み?）: {video_id}")
+                else:
+                    failed += 1
+                    logger.warning(f"統計取得に失敗: {video_id} - {e}")
+
+        result = {"updated": updated, "failed": failed, "skipped": skipped}
+        logger.info(f"統計更新完了: {result}")
         return result
 
     async def get_production_stats(self) -> dict[str, Any]:

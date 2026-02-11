@@ -10,6 +10,7 @@ from app.services.person_info_fetcher import PersonInfoFetcher
 from app.services.script_generator import ScriptGenerator
 from app.services.sheets_manager import SheetsManager
 from app.utils.logger import logger
+from app.utils.person_titles import register_person_info
 
 
 class DataDrivenWorkflow:
@@ -88,6 +89,14 @@ class DataDrivenWorkflow:
 
         logger.info(f"Person info: {person_info['title']}")
 
+        # 取得した情報を登録（画像生成で使用）
+        register_person_info(
+            person_name=person_suggestion["person_name"],
+            title=person_info.get("title"),
+            quote=person_info.get("famous_quote"),
+            appearance=person_info.get("appearance"),
+        )
+
         # Combine all information
         suggestion = {
             "person_name": person_suggestion["person_name"],
@@ -142,6 +151,15 @@ class DataDrivenWorkflow:
             # Get person info for provided person
             logger.info(f"Using provided person: {person_name}, topic: {topic}")
             person_info = await self.person_fetcher.get_person_info(person_name)
+
+            # 取得した情報を登録（画像生成で使用）
+            register_person_info(
+                person_name=person_name,
+                title=person_info.get("title"),
+                quote=person_info.get("famous_quote"),
+                appearance=person_info.get("appearance"),
+            )
+
             suggestion = {
                 "person_name": person_name,
                 "suggested_theme": topic,
@@ -186,6 +204,9 @@ class DataDrivenWorkflow:
                 except Exception as e:
                     logger.debug(f"戦略読み込みスキップ: {e}")
 
+            # 過去の冒頭テキストを取得（重複回避用）
+            previous_openings = await self._get_previous_openings()
+
             # 動的プロンプトを構築
             dynamic_prompt = self.dynamic_script_builder.build_dynamic_prompt(
                 person_name=person_name,
@@ -193,6 +214,7 @@ class DataDrivenWorkflow:
                 duration_minutes=duration_minutes,
                 channel_analysis=channel_analysis,
                 competitor_analysis=competitor_analysis,
+                previous_openings=previous_openings,
             )
             logger.info("動的プロンプト生成成功")
 
@@ -352,6 +374,25 @@ class DataDrivenWorkflow:
 
         except Exception as e:
             logger.warning(f"Failed to fetch recent persons from Sheets: {e}")
+            return []
+
+    async def _get_previous_openings(self, limit: int = 5) -> list[str]:
+        """
+        過去の動画の冒頭テキストをスプシから取得する。
+
+        Args:
+            limit: 取得する最大件数
+
+        Returns:
+            冒頭テキストのリスト
+        """
+        if not self.sheets_manager:
+            return []
+
+        try:
+            return await self.sheets_manager.get_previous_openings(limit=limit)
+        except Exception as e:
+            logger.debug(f"過去の冒頭テキスト取得スキップ: {e}")
             return []
 
     async def _get_analysis_from_sheets(self) -> str | None:

@@ -326,7 +326,10 @@ class YouTubeUploader:
         if not self.youtube_service:
             await self.authenticate()
 
-        logger.info(f"Posting comment on video: {video_id}")
+        logger.info(f"Posting comment on video: {video_id} (text length: {len(comment_text)})")
+        if not video_id or not video_id.strip():
+            logger.error("video_idが空です。コメント投稿をスキップします")
+            return None, "失敗"
 
         try:
             body = {

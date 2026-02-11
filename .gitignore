@@ -65,6 +65,9 @@ data/projects/
 *.log
 logs/
 
+# GitHub Actions Self-hosted Runner
+actions-runner/
+
 # OS
 .DS_Store
 Thumbs.db

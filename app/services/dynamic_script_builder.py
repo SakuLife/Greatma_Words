@@ -62,6 +62,33 @@ HOOK_STRATEGIES: dict[str, dict] = {
             "名言の力で視聴者を引き込み、その真意を解き明かす旅に誘うこと。"
         ),
     },
+    "provocation": {
+        "name": "挑発型",
+        "description": "視聴者の行動や価値観を直接挑発する",
+        "instruction": (
+            "冒頭は、視聴者の今の行動を直接否定する挑発から始めてください。"
+            "「あなたが今やっていること、全部無駄です」「この動画を閉じるなら、一生そのままです」のような強い断言。"
+            "{person_name}の哲学をもとに「なぜ無駄なのか」を鋭く突きつけ、視聴者を釘付けにすること。"
+        ),
+    },
+    "comparison": {
+        "name": "比較型",
+        "description": "成功者と凡人の対比で引き込む",
+        "instruction": (
+            "冒頭は、{person_name}と一般人の「決定的な違い」を対比で見せてください。"
+            "「ある人は○○しました。一方、多くの人は○○しています。この違いが、人生を分けました」のような形式。"
+            "対比のギャップで「自分はどちら側か」と考えさせること。"
+        ),
+    },
+    "future": {
+        "name": "未来予測型",
+        "description": "近い未来の予測で危機感を煽る",
+        "instruction": (
+            "冒頭は、3年後・5年後の未来予測から始めてください。"
+            "「3年後、今の仕事の半分は消えます」「あと5年で○○は常識になります」のような近未来の変化を提示。"
+            "{person_name}がなぜその未来を見抜いていたかに繋げ、「知らないと手遅れになる」と感じさせること。"
+        ),
+    },
 }
 
 
@@ -149,6 +176,7 @@ class DynamicScriptBuilder:
         duration_minutes: int,
         channel_analysis: ChannelDeepAnalysis | None = None,
         competitor_analysis: CompetitorAnalysis | None = None,
+        previous_openings: list[str] | None = None,
     ) -> str:
         """
         分析データに基づいて動的なプロンプトを生成
@@ -185,6 +213,9 @@ class DynamicScriptBuilder:
         logger.info(f"  構成パターン: {structure['name']} ({structure_key})")
         logger.info(f"  ターゲット: {audience_desc[:50]}...")
 
+        # 過去の冒頭テキストから重複回避指示を構築
+        anti_repetition = self._build_anti_repetition(previous_openings)
+
         # プロンプトを組み立て
         prompt = self._assemble_prompt(
             person_name=person_name,
@@ -197,6 +228,7 @@ class DynamicScriptBuilder:
             audience_desc=audience_desc,
             competitive_context=competitive_context,
             retention_insights=retention_insights,
+            anti_repetition=anti_repetition,
         )
 
         return prompt
@@ -374,6 +406,27 @@ class DynamicScriptBuilder:
             )
         return ""
 
+    def _build_anti_repetition(
+        self, previous_openings: list[str] | None
+    ) -> str:
+        """過去の冒頭テキストから重複回避指示を構築"""
+        if not previous_openings:
+            return ""
+
+        sections = [
+            "## 冒頭の差別化（重要）",
+            "以下は過去の動画で使用した冒頭です。これらと同じパターン・表現は絶対に使わないでください。",
+            "特に「毎日…」「あなたの今の毎日…」のような固定的な導入パターンは避けてください。",
+            "毎回まったく異なるアプローチで、視聴者が新鮮さを感じる冒頭にしてください。",
+            "",
+        ]
+        for i, opening in enumerate(previous_openings[-5:], 1):
+            # 長い場合は先頭100文字だけ
+            truncated = opening[:100] + "..." if len(opening) > 100 else opening
+            sections.append(f"- 過去{i}: 「{truncated}」")
+
+        return "\n".join(sections)
+
     def _assemble_prompt(
         self,
         person_name: str,
@@ -386,6 +439,7 @@ class DynamicScriptBuilder:
         audience_desc: str,
         competitive_context: str,
         retention_insights: str,
+        anti_repetition: str = "",
     ) -> str:
         """全パーツを組み合わせて最終プロンプトを構築"""
 
@@ -436,6 +490,13 @@ class DynamicScriptBuilder:
 
 {retention_insights}
 
+{anti_repetition}
+
+# 冒頭パターンの多様性（厳守）
+- 「毎日…」「あなたの今の毎日…」のような固定的な入りは禁止。毎回違う切り口で。
+- 冒頭の最初の1文は特に重要。過去の動画と被らない、斬新なアプローチを実験してください。
+- 同じフレーズの使い回しではなく、フック戦略に忠実な新しい表現を考えてください。
+
 # 出力形式
 以下のJSON形式で出力してください:
 
@@ -477,6 +538,11 @@ class DynamicScriptBuilder:
 VOICEVOXで音声合成するため、**英語表記は必ずカタカナに変換**すること。
 例: Google→グーグル, AI→エーアイ, CEO→シーイーオー, MBA→エムビーエー
 人名もカタカナで: Steve Jobs→スティーブ・ジョブズ, Elon Musk→イーロン・マスク
+
+**人名の読みがな注意（絶対厳守）:**
+- 人名は正しい読みで記述すること。読み違いは絶対NG。
+- 例: 藤田田→「ふじたでん」（「ふじたた」ではない）
+- 不確実な読みの人名は必ず確認した正しい読みを使用すること
 
 # 事実確認と正確性の要件（最重要）
 - 人物の実績・発言・エピソードは正確な情報に基づくこと

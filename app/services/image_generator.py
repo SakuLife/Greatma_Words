@@ -97,34 +97,28 @@ class ImageGenerator:
     ) -> Path:
         """Generate a portrait using KIEAI nanobanana API (非同期ジョブ形式)."""
         try:
-            # 参照画像がある場合はプロンプトを調整
+            # プロンプト: 参照画像の有無でスタイル指示は変えない
+            ref_instruction = ""
             if reference_image_urls:
-                prompt = (
-                    f"Professional portrait of the same person shown in reference images. "
-                    f"This is {person_name}. "
-                    f"Maintain exact facial features, face shape, and distinctive characteristics from the reference. "
-                    f"{person_description}. "
-                    f"Dark background, dramatic lighting, "
-                    f"face and upper body visible, "
-                    f"person positioned on the right half of the image, "
-                    f"left half is empty dark background, "
-                    f"no text, no letters, no words, "
-                    f"high quality, realistic portrait photography style."
+                ref_instruction = (
+                    f"REFERENCE IMAGES: Use ONLY for facial identity of {person_name}. "
+                    f"Copy the face, facial features, and distinctive characteristics. "
+                    f"Do NOT copy the background, pose, clothing, or composition from references. "
                 )
-                logger.info(f"[IMG2IMG] 参照画像を使用: {len(reference_image_urls)}枚")
-            else:
-                # プロンプト: 背景暗め、顔アップ、文字なし、人物は右半分に配置
-                prompt = (
-                    f"Professional portrait close-up of {person_name}. "
-                    f"{person_description}. "
-                    f"Dark background, dramatic lighting, "
-                    f"face and upper body visible, "
-                    f"person positioned on the right half of the image, "
-                    f"left half is empty dark background, "
-                    f"no text, no letters, no words, "
-                    f"high quality, realistic portrait photography style, "
-                    f"suitable for educational content."
-                )
+                logger.info(f"[IMG2IMG] 参照画像を顔特徴の参考に使用: {len(reference_image_urls)}枚")
+
+            prompt = (
+                f"{ref_instruction}"
+                f"Generate a NEW professional portrait of {person_name}. "
+                f"{person_description}. "
+                f"MANDATORY COMPOSITION: "
+                f"Solid dark black background, dramatic studio lighting, "
+                f"face and upper body visible, front-facing, looking at camera, "
+                f"person positioned on the right half of the image, "
+                f"left half is completely empty dark background, "
+                f"no text, no letters, no words, no watermarks, "
+                f"high quality, realistic portrait photography style."
+            )
 
             logger.debug(f"KIEAI nanobanana prompt: {prompt}")
 

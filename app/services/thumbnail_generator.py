@@ -117,18 +117,27 @@ class ThumbnailGenerator:
             return await self._generate_with_dalle(person_name, topic, output_path, style, quote)
 
         last_error: Exception | None = None
+        current_ref_urls = reference_image_urls
         for retry in range(self.MAX_RETRIES + 1):
             if retry > 0:
-                logger.info(
-                    f"サムネイル生成リトライ {retry}/{self.MAX_RETRIES}: "
-                    f"{self.RETRY_WAIT_SECONDS}秒待機後に再実行します..."
-                )
-                import time as _time
-                _time.sleep(self.RETRY_WAIT_SECONDS)
+                # 403/Forbiddenエラーの場合、参照画像がKIE AIからアクセス不可
+                # → 参照画像なしでリトライ（プロンプトのみで生成）
+                if last_error and ("403" in str(last_error) or "Forbidden" in str(last_error)):
+                    logger.info(
+                        "参照画像のURL取得が403エラー（Wikipedia等のブロック）→ 参照画像なしで再生成します"
+                    )
+                    current_ref_urls = None
+                else:
+                    logger.info(
+                        f"サムネイル生成リトライ {retry}/{self.MAX_RETRIES}: "
+                        f"{self.RETRY_WAIT_SECONDS}秒待機後に再実行します..."
+                    )
+                    import time as _time
+                    _time.sleep(self.RETRY_WAIT_SECONDS)
 
             try:
                 return await self._generate_nanobanana_once(
-                    person_name, topic, output_path, style, quote, thumbnail_copy, reference_image_urls
+                    person_name, topic, output_path, style, quote, thumbnail_copy, current_ref_urls
                 )
             except Exception as e:
                 last_error = e
@@ -370,15 +379,17 @@ class ThumbnailGenerator:
             main_copy = "必見"
             sub_copy = topic[:15] if topic else ""
 
-        # 参照画像がある場合はプロンプトを調整
+        # 外見描写は常に使用（参照画像がある場合も顔特徴の参考指示を追加）
+        appearance = get_person_appearance(person_name)
         if reference_image_urls:
             person_description = (
-                f"IMPORTANT: Generate the SAME PERSON shown in reference images. "
-                f"This is {person_name}. Maintain exact facial features, face shape, "
-                f"and distinctive characteristics from the reference photos."
+                f"PERSON: {appearance}, confident expression, looking at camera.\n"
+                f"REFERENCE IMAGES: Use ONLY for facial identity of {person_name}. "
+                f"Copy the face and facial features from reference. "
+                f"Do NOT copy background, pose, or composition from references."
             )
         else:
-            person_description = f"PERSON: {get_person_appearance(person_name)}, confident expression, looking at camera"
+            person_description = f"PERSON: {appearance}, confident expression, looking at camera"
 
         # プロンプト構築
         prompt = f"""YouTube thumbnail design.

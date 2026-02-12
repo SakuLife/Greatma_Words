@@ -320,6 +320,19 @@ class VideoGenerationOrchestrator:
                 )
                 logger.info(f"Generated thumbnail copy: {thumbnail_copy['main_copy']} / {thumbnail_copy['sub_copy']}")
 
+                # 動画内画像をサムネ参照に追加（見た目の統一性向上）
+                thumbnail_refs = list(reference_image_urls) if reference_image_urls else []
+                if image_path.exists():
+                    try:
+                        import base64
+                        with open(image_path, "rb") as f:
+                            b64_data = base64.b64encode(f.read()).decode()
+                        # 動画内画像を最優先参照として先頭に追加
+                        thumbnail_refs.insert(0, f"data:image/png;base64,{b64_data}")
+                        logger.info("[OK] 動画内画像をサムネ参照に追加（見た目統一）")
+                    except Exception as e:
+                        logger.warning(f"動画内画像のbase64変換に失敗（スキップ）: {e}")
+
                 await self.thumbnail_generator.generate_thumbnail(
                     person_name=config.person_name,
                     topic=config.topic,
@@ -327,7 +340,7 @@ class VideoGenerationOrchestrator:
                     style="professional",
                     quote=catchphrase,
                     thumbnail_copy=thumbnail_copy,
-                    reference_image_urls=reference_image_urls if reference_image_urls else None,
+                    reference_image_urls=thumbnail_refs if thumbnail_refs else None,
                 )
 
                 project.thumbnail_path = thumbnail_path

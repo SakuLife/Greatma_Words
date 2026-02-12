@@ -86,6 +86,11 @@ class PersonInfoFetcher:
   - 時代を反映した特徴（例: Meiji-era Japanese businessman, Renaissance-era Italian）
   - 表情・雰囲気（例: wise expression, dignified appearance）
 - 実在の人物の写真や肖像画に基づいた正確な外見描写をしてください
+- **年齢は「最も有名・認知されている時期」の年齢で固定すること**
+  - 存命人物: 最も活躍した時期の年齢（現在の年齢でなくてよい）
+  - 故人: 最も有名な業績を残した時期の年齢
+  - 例: スティーブ・ジョブズ → 50代（iPhone発表時期）、織田信長 → 40代
+- この外見描写はサムネイルと動画内画像の両方で使用するため、一貫した年齢で記述すること
 - 50-100語程度で具体的に記述してください
 """
 
@@ -224,9 +229,10 @@ class PersonInfoFetcher:
         candidates: list[dict] = []
         english_name = self._get_english_name(person_name)
 
-        # 英語名で検索（高品質な結果が多い）
+        # 英語名で検索（最も有名な時期のアイコニックな画像を優先）
         search_queries = [
-            f"{english_name} portrait photo",
+            f"{english_name} most famous iconic portrait",
+            f"{english_name} headshot",
         ]
         # 英語名と日本語名が同じ場合は日本語クエリも追加
         if english_name == person_name:

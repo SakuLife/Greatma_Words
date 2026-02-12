@@ -383,13 +383,20 @@ class ThumbnailGenerator:
         appearance = get_person_appearance(person_name)
         if reference_image_urls:
             person_description = (
-                f"PERSON: {appearance}, confident expression, looking at camera.\n"
+                f"PERSON: {appearance}, front-facing portrait, looking directly at camera, facing forward.\n"
                 f"REFERENCE IMAGES: Use ONLY for facial identity of {person_name}. "
                 f"Copy the face and facial features from reference. "
-                f"Do NOT copy background, pose, or composition from references."
+                f"CRITICAL: Completely IGNORE the background, setting, environment, pose, "
+                f"and clothing from reference images. "
+                f"ALWAYS generate with solid dark black studio background.\n"
+                f"NEGATIVE: No side view, no profile, no turned head, no looking away, "
+                f"no outdoor background, no natural scenery from references."
             )
         else:
-            person_description = f"PERSON: {appearance}, confident expression, looking at camera"
+            person_description = (
+                f"PERSON: {appearance}, front-facing portrait, looking directly at camera, facing forward.\n"
+                f"NEGATIVE: No side view, no profile, no turned head, no looking away."
+            )
 
         # プロンプト構築
         prompt = f"""YouTube thumbnail design.

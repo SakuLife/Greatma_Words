@@ -103,7 +103,9 @@ class ImageGenerator:
                 ref_instruction = (
                     f"REFERENCE IMAGES: Use ONLY for facial identity of {person_name}. "
                     f"Copy the face, facial features, and distinctive characteristics. "
-                    f"Do NOT copy the background, pose, clothing, or composition from references. "
+                    f"CRITICAL: Completely IGNORE the background, setting, environment, pose, "
+                    f"and clothing from reference images. "
+                    f"ALWAYS generate with solid dark black studio background. "
                 )
                 logger.info(f"[IMG2IMG] 参照画像を顔特徴の参考に使用: {len(reference_image_urls)}枚")
 
@@ -113,11 +115,13 @@ class ImageGenerator:
                 f"{person_description}. "
                 f"MANDATORY COMPOSITION: "
                 f"Solid dark black background, dramatic studio lighting, "
-                f"face and upper body visible, front-facing, looking at camera, "
+                f"face and upper body visible, front-facing portrait, looking directly at camera, facing forward, "
                 f"person positioned on the right half of the image, "
                 f"left half is completely empty dark background, "
                 f"no text, no letters, no words, no watermarks, "
-                f"high quality, realistic portrait photography style."
+                f"high quality, realistic portrait photography style. "
+                f"NEGATIVE: No side view, no profile, no turned head, no looking away, "
+                f"no outdoor background, no natural scenery."
             )
 
             logger.debug(f"KIEAI nanobanana prompt: {prompt}")

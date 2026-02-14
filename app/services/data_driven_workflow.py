@@ -216,6 +216,9 @@ class DataDrivenWorkflow:
                 competitor_analysis=competitor_analysis,
                 previous_openings=previous_openings,
             )
+            # 選択された戦略名をsuggestに保存（スプシ記録用）
+            suggestion["hook_strategy"] = self.dynamic_script_builder.last_hook_key
+            suggestion["structure_pattern"] = self.dynamic_script_builder.last_structure_key
             logger.info("動的プロンプト生成成功")
 
         except Exception as e:

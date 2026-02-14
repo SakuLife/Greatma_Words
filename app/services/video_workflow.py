@@ -516,11 +516,23 @@ class VideoWorkflow:
 
         # YouTube認証
         if not self.youtube_uploader.youtube_service:
-            await self.youtube_uploader.authenticate()
+            logger.info("YouTube API認証を開始...")
+            try:
+                await self.youtube_uploader.authenticate()
+                logger.info("✅ YouTube API認証成功")
+            except Exception as e:
+                logger.error(f"❌ YouTube API認証失敗: {e}")
+                return {"updated": 0, "failed": 0, "skipped": 0, "error": str(e)}
 
         # Sheets認証
         if not self.sheets_manager.service:
-            await self.sheets_manager.authenticate()
+            logger.info("Google Sheets API認証を開始...")
+            try:
+                await self.sheets_manager.authenticate()
+                logger.info("✅ Google Sheets API認証成功")
+            except Exception as e:
+                logger.error(f"❌ Google Sheets API認証失敗: {e}")
+                return {"updated": 0, "failed": 0, "skipped": 0, "error": str(e)}
 
         # 更新対象の動画リスト取得
         videos = await self.sheets_manager.get_videos_for_stats_update()

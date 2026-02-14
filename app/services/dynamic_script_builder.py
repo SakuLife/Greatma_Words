@@ -168,6 +168,9 @@ class DynamicScriptBuilder:
         self.fallback_template_path = (
             Path("data/templates/prompts/script_template.md")
         )
+        # 最後に選択した戦略名（スプシ記録用）
+        self.last_hook_key: str = ""
+        self.last_structure_key: str = ""
 
     def build_dynamic_prompt(
         self,
@@ -207,6 +210,10 @@ class DynamicScriptBuilder:
 
         # 維持率インサイト
         retention_insights = self._build_retention_insights(channel_analysis)
+
+        # 選択結果を保持（スプシ記録用）
+        self.last_hook_key = hook_key
+        self.last_structure_key = structure_key
 
         logger.info(f"動的プロンプト生成:")
         logger.info(f"  フック戦略: {hook['name']} ({hook_key})")
@@ -443,16 +450,21 @@ class DynamicScriptBuilder:
     ) -> str:
         """全パーツを組み合わせて最終プロンプトを構築"""
 
+        # VOICEVOXの読み上げ速度: 約350文字/分
+        chars_per_minute = 350
+        total_target_chars = duration_minutes * chars_per_minute
+
         # セクション定義を構築
         sections_text = ""
         for i, section in enumerate(structure["sections"], 1):
             section_minutes = duration_minutes * section["ratio"]
             section_seconds = int(section_minutes * 60)
+            section_chars = int(total_target_chars * section["ratio"])
             instruction = section["instruction"].replace(
                 "{person_name}", person_name
             )
             sections_text += (
-                f"**{i}. 【{section['title']}】(約{section_minutes:.1f}分, {section_seconds}秒)**\n"
+                f"**{i}. 【{section['title']}】({section_minutes:.1f}分, {section_seconds}秒, 最低{section_chars}文字)**\n"
                 f"   {instruction}\n\n"
             )
 
@@ -476,13 +488,20 @@ class DynamicScriptBuilder:
 # 入力テーマ
 **【解説する人物・書籍】**: {person_name}
 **【伝えたい核心的メッセージ】**: {topic}
-**【動画の目標時間】**: {duration_minutes}分
+**【動画の目標時間】**: {duration_minutes}分（厳守）
 
 # 冒頭フックの指示
 {hook_instruction}
 
+# 動画の長さに関する絶対要件（最重要）
+- 音声合成エンジン（VOICEVOX）の読み上げ速度は**約350文字/分**です
+- {duration_minutes}分の動画に必要なナレーション文字数は**最低{total_target_chars}文字**です
+- 各セクションの`narration`の文字数は、指定された最低文字数を必ず満たしてください
+- ナレーション全体の合計文字数が{total_target_chars}文字を下回ると動画が短くなりすぎるため、絶対に避けてください
+- 具体的なエピソード、事例、名言の解説を十分に盛り込み、内容を充実させてください
+
 # 台本の構成要件
-以下の構成で、合計で{duration_minutes}分程度の台本になるように詳細に書いてください。
+以下の構成で台本を作成してください。各セクションの最低文字数を厳守すること。
 
 {sections_text}
 

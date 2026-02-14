@@ -113,14 +113,38 @@ class ScriptGenerator:
             # 台本の内容をログに出力
             logger.info("=" * 60)
             logger.info("[台本内容]")
+            total_chars = 0
             for i, section in enumerate(script.sections, 1):
+                section_chars = len(section.narration)
+                total_chars += section_chars
                 logger.info(f"  セクション{i}: {section.title}")
-                # ナレーションの最初の100文字を表示
                 narration_preview = section.narration[:100] + "..." if len(section.narration) > 100 else section.narration
                 logger.info(f"    内容: {narration_preview}")
-                logger.info(f"    長さ: {section.duration_seconds}秒")
+                logger.info(f"    長さ: {section.duration_seconds}秒 / 文字数: {section_chars}文字")
             total_duration = sum(s.duration_seconds for s in script.sections)
             logger.info(f"  合計時間: {total_duration}秒 ({total_duration/60:.1f}分)")
+            logger.info(f"  合計文字数: {total_chars}文字")
+
+            # ナレーション長チェック（VOICEVOX: 約350文字/分）
+            chars_per_minute = 350
+            expected_chars = duration_minutes * chars_per_minute
+            estimated_minutes = total_chars / chars_per_minute
+            logger.info(f"  推定読み上げ時間: {estimated_minutes:.1f}分（目標: {duration_minutes}分）")
+
+            if total_chars < expected_chars * 0.7:
+                logger.warning(
+                    f"⚠️ ナレーション文字数が不足しています！"
+                    f"（{total_chars}文字 / 目標{expected_chars}文字 = {total_chars/expected_chars*100:.0f}%）"
+                    f"動画が目標の{duration_minutes}分より大幅に短くなる可能性があります。"
+                )
+            elif total_chars < expected_chars * 0.85:
+                logger.warning(
+                    f"⚠️ ナレーション文字数がやや少なめです"
+                    f"（{total_chars}文字 / 目標{expected_chars}文字 = {total_chars/expected_chars*100:.0f}%）"
+                )
+            else:
+                logger.info(f"  ✅ 文字数OK（{total_chars/expected_chars*100:.0f}%）")
+
             logger.info("=" * 60)
 
             return script

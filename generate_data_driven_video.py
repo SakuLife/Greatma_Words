@@ -145,9 +145,11 @@ async def generate_data_driven_video(
             youtube_privacy=youtube_privacy,
         )
 
-        # Generate video with the pre-generated script
-        # (orchestratorは内部でscriptを生成するので、一旦通常フローで実行)
-        project, video_path = await orchestrator.generate_complete_video(config)
+        # data-driven台本を使って動画生成（台本の再生成をスキップ）
+        project = orchestrator.file_manager.create_project(topic, person_name)
+        project, video_path = await orchestrator.generate_video_from_script(
+            project, script, config
+        )
 
         logger.info(f"動画生成成功: {video_path}")
         log_group_end()
@@ -254,6 +256,16 @@ async def generate_data_driven_video(
                 if auto_suggest:
                     notes += f"\n期待エンゲージメント: {suggestion.get('expected_engagement', 'N/A')}"
 
+                # 台本から冒頭テキストとアクションプランを抽出
+                opening_text = ""
+                action_plan = ""
+                if script and script.sections:
+                    opening_text = script.sections[0].narration[:200] if script.sections[0].narration else ""
+                    for section in script.sections:
+                        if any(kw in section.title for kw in ["応用", "アクション", "実践"]):
+                            action_plan = section.narration[:200] if section.narration else ""
+                            break
+
                 success = await sheets.log_video_production(
                     person_name=person_name,
                     theme=topic,
@@ -262,6 +274,10 @@ async def generate_data_driven_video(
                     youtube_url=youtube_url,
                     drive_url=drive_url,
                     project_path=str(project.project_dir),
+                    opening_text=opening_text,
+                    action_plan=action_plan,
+                    hook_strategy=suggestion.get("hook_strategy", ""),
+                    structure_pattern=suggestion.get("structure_pattern", ""),
                 )
 
                 if success:

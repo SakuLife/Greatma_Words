@@ -162,11 +162,17 @@ jobs:
           exit 1
 
       - name: Update video stats (views, likes, comments)
+        id: update_stats
         continue-on-error: true
         env:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
         run: python update_video_stats.py
+
+      - name: Report stats update failure
+        if: steps.update_stats.outcome == 'failure'
+        run: |
+          echo "::warning::動画統計の更新に失敗しました。token.jsonまたはsheets_token.jsonの有効性を確認してください。"
 
       - name: Retry pending comments (from previous scheduled videos)
         continue-on-error: true

@@ -17,7 +17,9 @@ from app.utils.logger import logger
 
 async def main():
     """全動画の統計情報を一括更新"""
+    logger.info("=" * 60)
     logger.info("動画統計の一括更新を開始します")
+    logger.info("=" * 60)
 
     workflow = VideoWorkflow(
         enable_youtube=True,
@@ -31,11 +33,16 @@ async def main():
     logger.info(f"更新結果: {result}")
 
     if result["updated"] > 0:
-        logger.info(f"{result['updated']}件の統計を更新しました")
+        logger.info(f"✅ {result['updated']}件の統計を更新しました")
     if result["skipped"] > 0:
-        logger.info(f"{result['skipped']}件をスキップ（動画が見つかりません）")
+        logger.info(f"⏭️ {result['skipped']}件をスキップ（動画が見つかりません）")
     if result["failed"] > 0:
-        logger.warning(f"{result['failed']}件の統計取得に失敗しました")
+        logger.error(f"❌ {result['failed']}件の統計取得に失敗しました")
+
+    # 全件失敗の場合はエラー終了（CI で検知できるように）
+    if result["updated"] == 0 and result["failed"] > 0:
+        logger.error("統計更新が全件失敗しました。認証トークンを確認してください。")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
@@ -44,5 +51,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nCancelled")
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"統計更新でエラーが発生: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)

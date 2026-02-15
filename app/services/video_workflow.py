@@ -1,6 +1,6 @@
 """
 Integrated video production workflow.
-Coordinates all services: script, images, voice, video, YouTube, Drive, Sheets, Discord.
+Coordinates all services: script, images, voice, video, YouTube, Sheets, Discord.
 """
 
 import time
@@ -11,7 +11,6 @@ from typing import Any
 from app.config import settings
 from app.models.schemas import VideoMetadata
 from app.services.discord_notifier import DiscordNotifier
-from app.services.drive_manager import DriveManager
 from app.services.image_generator import ImageGenerator
 from app.services.script_generator import ScriptGenerator
 from app.services.sheets_manager import SheetsManager
@@ -75,7 +74,6 @@ class VideoWorkflow:
     def __init__(
         self,
         enable_youtube: bool = True,
-        enable_drive: bool = True,
         enable_sheets: bool = True,
         enable_discord: bool = True,
     ):
@@ -84,12 +82,10 @@ class VideoWorkflow:
 
         Args:
             enable_youtube: Enable YouTube upload
-            enable_drive: Enable Google Drive upload
             enable_sheets: Enable Google Sheets logging
             enable_discord: Enable Discord notifications
         """
         self.enable_youtube = enable_youtube
-        self.enable_drive = enable_drive
         self.enable_sheets = enable_sheets
         self.enable_discord = enable_discord
 
@@ -105,7 +101,6 @@ class VideoWorkflow:
 
         # Initialize optional services
         self.youtube_uploader = YouTubeUploader() if enable_youtube else None
-        self.drive_manager = DriveManager() if enable_drive else None
         self.sheets_manager = SheetsManager() if enable_sheets else None
         self.discord_notifier = DiscordNotifier() if enable_discord else None
 
@@ -115,7 +110,6 @@ class VideoWorkflow:
         theme: str,
         target_duration: int = 15,
         upload_to_youtube: bool = True,
-        upload_to_drive: bool = True,
         privacy_status: str = "private",
         hook_strategy: str = "",
         structure_pattern: str = "",
@@ -128,7 +122,6 @@ class VideoWorkflow:
             theme: Video theme
             target_duration: Target video duration in minutes
             upload_to_youtube: Whether to upload to YouTube
-            upload_to_drive: Whether to upload to Google Drive
             privacy_status: YouTube privacy status (public/private/unlisted)
             hook_strategy: 使用したフック戦略名（スプシ記録用）
             structure_pattern: 使用した構成パターン名（スプシ記録用）
@@ -313,22 +306,7 @@ class VideoWorkflow:
                         video_id, metadata.title, privacy_status
                     )
 
-            # Step 8: Upload to Google Drive (optional)
-            drive_url = None
-            if upload_to_drive and self.drive_manager and self.enable_drive:
-                file_info = await self.drive_manager.upload_file(
-                    video_file,
-                    file_name=f"{person_name}_{theme}.mp4",
-                )
-                drive_url = file_info["url"]
-                file_size_mb = file_info["size"] / (1024 * 1024)
-
-                if self.discord_notifier:
-                    await self.discord_notifier.notify_drive_uploaded(
-                        file_info["name"], drive_url, file_size_mb
-                    )
-
-            # Step 9: Log to Google Sheets (optional)
+            # Step 8: Log to Google Sheets (optional)
             if self.sheets_manager and self.enable_sheets:
                 generation_time = time.time() - start_time
 
@@ -350,7 +328,6 @@ class VideoWorkflow:
                     video_duration=audio_duration,
                     generation_time=generation_time,
                     youtube_url=youtube_url,
-                    drive_url=drive_url,
                     project_path=str(project_dir),
                     auto_comment_status=auto_comment_status if upload_to_youtube else "",
                     auto_comment_text=auto_comment_text if upload_to_youtube else "",
@@ -360,7 +337,7 @@ class VideoWorkflow:
                     structure_pattern=structure_pattern,
                 )
 
-            # Step 10: Send completion notification
+            # Step 9: Send completion notification
             if self.discord_notifier:
                 await self.discord_notifier.notify_video_completed(
                     person_name=person_name,
@@ -368,7 +345,6 @@ class VideoWorkflow:
                     output_path=str(video_file),
                     duration=audio_duration,
                     youtube_url=youtube_url,
-                    drive_url=drive_url,
                 )
 
             # Return results
@@ -384,7 +360,6 @@ class VideoWorkflow:
                 "thumbnail_file": str(thumbnail_file) if thumbnail_file else None,
                 "youtube_url": youtube_url,
                 "youtube_video_id": video_id,
-                "drive_url": drive_url,
                 "duration_seconds": audio_duration,
                 "generation_time_seconds": total_time,
             }

@@ -142,7 +142,6 @@ jobs:
           YOUTUBE_DEFAULT_CATEGORY=22
           YOUTUBE_DEFAULT_PRIVACY=private
           GOOGLE_CLIENT_SECRETS_FILE=client_secrets.json
-          GOOGLE_DRIVE_FOLDER_ID=${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
           GOOGLE_SHEETS_ID=${{ secrets.GOOGLE_SHEETS_ID }}
           DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}
           DATA_DIR=./data
@@ -157,6 +156,12 @@ jobs:
 
       - name: Start VOICEVOX with Docker
         run: |
+          # 前回のコンテナが残っている場合はクリーンアップ
+          docker compose down 2>/dev/null || docker-compose down 2>/dev/null || true
+          # ポート50021を使用しているコンテナがあれば停止
+          docker ps -q --filter "publish=50021" | xargs -r docker stop 2>/dev/null || true
+          docker ps -aq --filter "publish=50021" | xargs -r docker rm 2>/dev/null || true
+
           # Start VOICEVOX with Docker Compose
           docker compose up -d voicevox 2>/dev/null || docker-compose up -d voicevox
 

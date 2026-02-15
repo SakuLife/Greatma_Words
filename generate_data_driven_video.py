@@ -12,7 +12,6 @@ from app.main import orchestrator
 from app.models.schemas import GenerationConfig
 from app.services.data_driven_workflow import DataDrivenWorkflow
 from app.services.discord_notifier import DiscordNotifier
-from app.services.drive_manager import DriveManager
 from app.services.sheets_manager import SheetsManager
 from app.services.upload_time_optimizer import UploadTimeOptimizer
 from app.utils.logger import logger, log_group, log_group_end
@@ -26,7 +25,6 @@ async def generate_data_driven_video(
     topic: str | None = None,
     duration_minutes: int = 15,
     upload_to_youtube: bool = True,
-    upload_to_drive: bool = True,
     log_to_sheets: bool = True,
     send_discord_notifications: bool = True,
     youtube_privacy: str = "private",
@@ -41,7 +39,6 @@ async def generate_data_driven_video(
         topic: Video topic (if None and auto_suggest=True, AI will suggest)
         duration_minutes: Target duration in minutes
         upload_to_youtube: Whether to upload to YouTube
-        upload_to_drive: Whether to upload to Google Drive
         log_to_sheets: Whether to log to Google Sheets
         send_discord_notifications: Whether to send Discord notifications
         youtube_privacy: YouTube privacy status (public/private/unlisted)
@@ -53,7 +50,6 @@ async def generate_data_driven_video(
 
     # Initialize integrations
     discord = DiscordNotifier() if send_discord_notifications else None
-    drive = DriveManager() if upload_to_drive else None
     sheets = SheetsManager() if log_to_sheets else None
     workflow = DataDrivenWorkflow()
 
@@ -200,46 +196,10 @@ async def generate_data_driven_video(
             except Exception as e:
                 logger.warning(f"A/Bテスト登録に失敗（動画生成には影響なし）: {e}")
 
-        # Step 4: Upload to Google Drive
-        drive_url = None
-        if upload_to_drive and drive:
-            try:
-                log_group("Step 4: Google Driveアップロード")
-
-                if discord:
-                    try:
-                        await discord.notify_task_progress(
-                            "バックアップ", 7, 8, "Google Driveにアップロード中..."
-                        )
-                    except Exception as e:
-                        logger.warning(f"Discord notification failed (Drive start): {e}")
-
-                file_info = await drive.upload_file(
-                    video_path,
-                    file_name=f"{person_name}_{topic}.mp4",
-                )
-                drive_url = file_info["url"]
-                file_size_mb = file_info["size"] / (1024 * 1024)
-
-                logger.info(f"Driveアップロード完了: {drive_url}")
-
-                if discord:
-                    try:
-                        await discord.notify_drive_uploaded(
-                            file_info["name"], drive_url, file_size_mb
-                        )
-                    except Exception as e:
-                        logger.warning(f"Discord notification failed (Drive complete): {e}")
-                log_group_end()
-            except Exception as e:
-                log_group_end()
-                logger.error(f"Google Drive upload failed: {e}")
-                # Continue even if Drive upload fails
-
-        # Step 5: Log to Google Sheets
+        # Step 4: Log to Google Sheets
         if log_to_sheets and sheets:
             try:
-                log_group("Step 5: Google Sheetsログ記録")
+                log_group("Step 4: Google Sheetsログ記録")
 
                 if discord:
                     try:
@@ -272,7 +232,6 @@ async def generate_data_driven_video(
                     video_duration=video_duration,
                     generation_time=generation_time,
                     youtube_url=youtube_url,
-                    drive_url=drive_url,
                     project_path=str(project.project_dir),
                     auto_comment_status=project.auto_comment_status,
                     auto_comment_text=project.auto_comment_text,
@@ -321,7 +280,6 @@ async def generate_data_driven_video(
                     output_path=str(video_path),
                     duration=video_duration,
                     youtube_url=youtube_url,
-                    drive_url=drive_url,
                 )
             except Exception as e:
                 logger.warning(f"Discord notification failed (completion): {e}")
@@ -338,7 +296,6 @@ async def generate_data_driven_video(
             "thumbnail_path": str(project.thumbnail_path) if project.thumbnail_path else None,
             "youtube_url": youtube_url,
             "youtube_video_id": project.youtube_video_id,
-            "drive_url": drive_url,
             "video_duration_seconds": video_duration,
             "generation_time_seconds": total_time,
         }
@@ -379,7 +336,6 @@ async def main():
             topic=None,
             duration_minutes=duration,
             upload_to_youtube=True,
-            upload_to_drive=True,
             log_to_sheets=True,
             send_discord_notifications=True,
             youtube_privacy="private",
@@ -402,7 +358,6 @@ async def main():
             topic=topic,
             duration_minutes=duration,
             upload_to_youtube=True,
-            upload_to_drive=True,
             log_to_sheets=True,
             send_discord_notifications=True,
             youtube_privacy="public",  # 公開設定
@@ -434,7 +389,6 @@ async def main():
                 topic=None,
                 duration_minutes=duration,
                 upload_to_youtube=True,
-                upload_to_drive=True,
                 log_to_sheets=True,
                 send_discord_notifications=True,
                 youtube_privacy="private",
@@ -458,7 +412,6 @@ async def main():
                 topic=topic,
                 duration_minutes=duration,
                 upload_to_youtube=True,
-                upload_to_drive=True,
                 log_to_sheets=True,
                 send_discord_notifications=True,
                 youtube_privacy="private",
@@ -487,9 +440,6 @@ async def main():
         if result.get("youtube_url"):
             print(f"\n[YouTube] {result['youtube_url']}")
             print(f"          Video ID: {result['youtube_video_id']}")
-
-        if result.get("drive_url"):
-            print(f"\n[Google Drive] {result['drive_url']}")
 
         print(f"\n[Google Sheets] https://docs.google.com/spreadsheets/d/{settings.google_sheets_id}")
         print(f"\n[Discord] チャンネルで通知を確認してください")

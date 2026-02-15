@@ -103,6 +103,10 @@ class Project(BaseModel):
     video_metadata: Optional[VideoMetadata] = None
     youtube_video_id: Optional[str] = None
 
+    # 自動コメント結果
+    auto_comment_status: str = ""  # "成功" / "保留" / "失敗" / ""
+    auto_comment_text: str = ""
+
     class Config:
         use_enum_values = True
 

@@ -274,6 +274,8 @@ async def generate_data_driven_video(
                     youtube_url=youtube_url,
                     drive_url=drive_url,
                     project_path=str(project.project_dir),
+                    auto_comment_status=project.auto_comment_status,
+                    auto_comment_text=project.auto_comment_text,
                     opening_text=opening_text,
                     action_plan=action_plan,
                     hook_strategy=suggestion.get("hook_strategy", ""),

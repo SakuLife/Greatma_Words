@@ -427,13 +427,20 @@ class VideoGenerationOrchestrator:
                         comment_id, comment_status = await self.youtube_uploader.post_comment(
                             video_id, comment_text
                         )
+                        # コメント結果をprojectに保存（呼び出し元でSheets記録用）
+                        project.auto_comment_text = comment_text
                         if comment_id:
+                            project.auto_comment_status = "成功"
                             logger.info(f"Auto-comment posted: {comment_id}")
                         elif comment_status == "コメント無効":
+                            project.auto_comment_status = "保留"
                             logger.info(
                                 "コメント保留: 予約投稿動画のため公開後にリトライが必要です"
                             )
+                        else:
+                            project.auto_comment_status = "失敗"
                     except Exception as e:
+                        project.auto_comment_status = "失敗"
                         logger.warning(f"Auto-comment failed (non-critical): {e}")
 
                 log_group_end()
@@ -715,13 +722,20 @@ class VideoGenerationOrchestrator:
                         comment_id, comment_status = await self.youtube_uploader.post_comment(
                             video_id, comment_text
                         )
+                        # コメント結果をprojectに保存（呼び出し元でSheets記録用）
+                        project.auto_comment_text = comment_text
                         if comment_id:
+                            project.auto_comment_status = "成功"
                             logger.info(f"Auto-comment posted: {comment_id}")
                         elif comment_status == "コメント無効":
+                            project.auto_comment_status = "保留"
                             logger.info(
                                 "コメント保留: 予約投稿動画のため公開後にリトライが必要です"
                             )
+                        else:
+                            project.auto_comment_status = "失敗"
                     except Exception as e:
+                        project.auto_comment_status = "失敗"
                         logger.warning(f"Auto-comment failed (non-critical): {e}")
 
             else:

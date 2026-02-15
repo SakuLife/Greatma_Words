@@ -43,7 +43,7 @@ jobs:
         run: |
           echo "Checking Docker..."
           docker --version
-          docker compose version
+          docker-compose version || docker compose version
 
       - name: Write client_secrets.json
         continue-on-error: true
@@ -146,7 +146,7 @@ jobs:
       - name: Start VOICEVOX with Docker
         run: |
           # Start VOICEVOX with Docker Compose
-          docker compose up -d voicevox
+          docker-compose up -d voicevox
 
           # Wait for API to be ready (max 60 seconds)
           echo "Waiting for VOICEVOX API to be ready..."
@@ -203,4 +203,4 @@ jobs:
       - name: Stop VOICEVOX
         if: always()
         run: |
-          docker compose down
+          docker-compose down

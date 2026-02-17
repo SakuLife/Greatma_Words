@@ -709,6 +709,20 @@ class VideoGenerationOrchestrator:
                     f"Video uploaded to YouTube: https://www.youtube.com/watch?v={video_id}"
                 )
 
+                # サムネイルをYouTubeに設定
+                if project.thumbnail_path and project.thumbnail_path.exists():
+                    thumbnail_size = project.thumbnail_path.stat().st_size
+                    logger.info(f"Thumbnail file exists: {project.thumbnail_path} ({thumbnail_size} bytes)")
+                    try:
+                        await self.youtube_uploader.set_thumbnail(video_id, project.thumbnail_path)
+                        logger.info(f"Thumbnail set on YouTube: {project.thumbnail_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to set thumbnail on YouTube: {e}")
+                        import traceback
+                        logger.debug(traceback.format_exc())
+                else:
+                    logger.warning(f"Thumbnail not found or not generated: {project.thumbnail_path}")
+
                 # 自動コメント投稿（台本のCTAに対するお手本コメント）
                 if settings.youtube_auto_comment:
                     try:

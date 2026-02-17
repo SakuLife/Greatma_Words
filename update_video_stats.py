@@ -23,7 +23,6 @@ async def main():
 
     workflow = VideoWorkflow(
         enable_youtube=True,
-        enable_drive=False,
         enable_sheets=True,
         enable_discord=False,
     )

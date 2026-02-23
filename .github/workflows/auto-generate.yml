@@ -154,6 +154,18 @@ jobs:
           # Remove leading spaces from .env file
           sed -i 's/^[[:space:]]*//' .env
 
+      - name: Pull VOICEVOX Docker image (if not cached)
+        timeout-minutes: 30
+        run: |
+          IMAGE="voicevox/voicevox_engine:cpu-ubuntu20.04-0.22.2"
+          if docker image inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "Image already cached: $IMAGE"
+          else
+            echo "Pulling $IMAGE (4GB+, may take a while)..."
+            docker pull "$IMAGE"
+            echo "Pull complete."
+          fi
+
       - name: Start VOICEVOX with Docker
         run: |
           # 前回のコンテナが残っている場合はクリーンアップ
@@ -165,17 +177,17 @@ jobs:
           # Start VOICEVOX with Docker Compose
           docker compose up -d voicevox 2>/dev/null || docker-compose up -d voicevox
 
-          # Wait for API to be ready (max 60 seconds)
+          # Wait for API to be ready (max 120 seconds)
           echo "Waiting for VOICEVOX API to be ready..."
-          for i in {1..30}; do
+          for i in {1..60}; do
             sleep 2
             if curl -s http://localhost:50021/version > /dev/null 2>&1; then
               echo "VOICEVOX API is ready!"
               exit 0
             fi
-            echo "Attempt $i/30 - Waiting for API..."
+            echo "Attempt $i/60 - Waiting for API..."
           done
-          echo "VOICEVOX API did not become ready within 60 seconds"
+          echo "VOICEVOX API did not become ready within 120 seconds"
           exit 1
 
       - name: Update video stats (views, likes, comments)

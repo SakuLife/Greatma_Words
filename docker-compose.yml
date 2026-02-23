@@ -1,6 +1,6 @@
 services:
   voicevox:
-    image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest
+    image: voicevox/voicevox_engine:cpu-ubuntu20.04-0.22.2
     ports:
       - "50021:50021"
     environment:

@@ -372,11 +372,16 @@ class ThumbnailGenerator:
         """
         # キャッチコピーを取得
         if thumbnail_copy:
-            main_copy = thumbnail_copy.get("main_copy", "必見")
+            main_copy = thumbnail_copy.get("main_copy", "")
             sub_copy = thumbnail_copy.get("sub_copy", "")
         else:
-            # フォールバック
-            main_copy = "必見"
+            main_copy = ""
+            sub_copy = ""
+
+        # フォールバック: main_copyが空の場合はトピックから生成
+        if not main_copy:
+            main_copy = topic[:8] if topic else person_name
+        if not sub_copy:
             sub_copy = topic[:15] if topic else ""
 
         # 外見描写は常に使用（参照画像がある場合も顔特徴の参考指示を追加）

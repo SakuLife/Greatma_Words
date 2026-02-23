@@ -120,11 +120,14 @@ class ThumbnailGenerator:
         current_ref_urls = reference_image_urls
         for retry in range(self.MAX_RETRIES + 1):
             if retry > 0:
-                # 403/Forbiddenエラーの場合、参照画像がKIE AIからアクセス不可
-                # → 参照画像なしでリトライ（プロンプトのみで生成）
-                if last_error and ("403" in str(last_error) or "Forbidden" in str(last_error)):
+                # 参照画像関連エラーの場合、参照画像なしでリトライ
+                error_str = str(last_error) if last_error else ""
+                is_ref_image_error = any(kw in error_str for kw in [
+                    "403", "Forbidden", "image_input", "file type not supported",
+                ])
+                if is_ref_image_error:
                     logger.info(
-                        "参照画像のURL取得が403エラー（Wikipedia等のブロック）→ 参照画像なしで再生成します"
+                        f"参照画像関連エラー → 参照画像なしで再生成します: {error_str[:100]}"
                     )
                     current_ref_urls = None
                 else:
@@ -182,9 +185,14 @@ class ThumbnailGenerator:
         }
 
         # 参照画像がある場合は image_input パラメータを追加（配列形式）
+        # base64 data URIはKIE AIが非対応のためフィルタリング
         if reference_image_urls:
-            input_params["image_input"] = reference_image_urls[:8]  # 最大8枚
-            logger.info(f"[IMG2IMG] サムネイル用参照画像を使用: {len(reference_image_urls)}枚")
+            valid_urls = [url for url in reference_image_urls if not url.startswith("data:")]
+            if valid_urls:
+                input_params["image_input"] = valid_urls[:8]  # 最大8枚
+                logger.info(f"[IMG2IMG] サムネイル用参照画像を使用: {len(valid_urls)}枚")
+            if len(valid_urls) < len(reference_image_urls):
+                logger.info(f"[INFO] base64画像{len(reference_image_urls) - len(valid_urls)}枚はKIE AI非対応のためスキップ")
 
         payload = {
             "model": self.thumbnail_model,  # google/nano-banana-pro
@@ -204,11 +212,18 @@ class ThumbnailGenerator:
 
         logger.info(f"KIE AI createTask response: {result}")
 
+        # APIエラーチェック（code: 500等）
+        api_code = result.get("code")
+        if api_code and api_code != 200:
+            error_msg = result.get("msg", "Unknown API error")
+            raise ValueError(f"KIE AI API error (code={api_code}): {error_msg}")
+
         # KIE AI response format: {"code": 200, "data": {"taskId": "..."}}
+        data = result.get("data") or {}
         task_id = (
-            result.get("data", {}).get("taskId")
-            or result.get("data", {}).get("task_id")
-            or result.get("data", {}).get("id")
+            data.get("taskId")
+            or data.get("task_id")
+            or data.get("id")
             or result.get("id")
             or result.get("task_id")
             or result.get("taskId")

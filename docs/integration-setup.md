@@ -82,13 +82,13 @@ D:\AutoSystem\PythonSystem\greatman_words\
 2. 新しいフォルダを作成: 例）`GreatMan Words Videos`
 3. フォルダを開いてURLを確認:
    ```
-   https://drive.google.com/drive/folders/YOUR_DRIVE_FOLDER_ID
+   https://drive.google.com/drive/folders/YOUR_FOLDER_ID_HERE
                                           ↑
                                     フォルダID（この部分をコピー）
    ```
 4. フォルダIDを `.env` ファイルに記載:
    ```env
-   GOOGLE_DRIVE_FOLDER_ID=YOUR_DRIVE_FOLDER_ID
+   GOOGLE_DRIVE_FOLDER_ID=YOUR_FOLDER_ID_HERE
    ```
 
 ---
@@ -101,13 +101,13 @@ D:\AutoSystem\PythonSystem\greatman_words\
 2. 新しいスプレッドシートを作成: `GreatMan Words - タスク管理`
 3. URLからスプレッドシートIDを取得:
    ```
-   https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit
+   https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID_HERE/edit
                                           ↑
                                     スプレッドシートID（この部分をコピー）
    ```
 4. スプレッドシートIDを `.env` に記載:
    ```env
-   GOOGLE_SHEETS_ID=YOUR_SPREADSHEET_ID
+   GOOGLE_SHEETS_ID=YOUR_SPREADSHEET_ID_HERE
    ```
 
 ### 3.2 シート構成

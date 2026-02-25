@@ -15,8 +15,8 @@ on:
 
 jobs:
   generate:
-    # Self-hosted Linux runner
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
@@ -38,24 +38,6 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
-
-      - name: Ensure Docker Compose is available
-        run: |
-          echo "Checking Docker..."
-          docker --version
-          # docker compose v2 plugin がなければインストール
-          if ! docker compose version 2>/dev/null; then
-            echo "Installing docker-compose-plugin..."
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq docker-compose-plugin 2>/dev/null \
-              || sudo apt-get install -y -qq docker-compose 2>/dev/null \
-              || echo "::warning::docker-compose install failed, trying pip..."
-            # それでもダメならpipでインストール
-            if ! docker compose version 2>/dev/null && ! docker-compose version 2>/dev/null; then
-              pip install docker-compose
-            fi
-          fi
-          docker compose version 2>/dev/null || docker-compose version
 
       - name: Write client_secrets.json
         continue-on-error: true
@@ -154,28 +136,13 @@ jobs:
           # Remove leading spaces from .env file
           sed -i 's/^[[:space:]]*//' .env
 
-      - name: Pull VOICEVOX Docker image (if not cached)
-        timeout-minutes: 30
-        run: |
-          IMAGE="voicevox/voicevox_engine:cpu-ubuntu20.04-0.22.2"
-          if docker image inspect "$IMAGE" > /dev/null 2>&1; then
-            echo "Image already cached: $IMAGE"
-          else
-            echo "Pulling $IMAGE (4GB+, may take a while)..."
-            docker pull "$IMAGE"
-            echo "Pull complete."
-          fi
+      - name: Pull VOICEVOX Docker image
+        timeout-minutes: 10
+        run: docker pull voicevox/voicevox_engine:cpu-ubuntu20.04-0.22.2
 
       - name: Start VOICEVOX with Docker
         run: |
-          # 前回のコンテナが残っている場合はクリーンアップ
-          docker compose down 2>/dev/null || docker-compose down 2>/dev/null || true
-          # ポート50021を使用しているコンテナがあれば停止
-          docker ps -q --filter "publish=50021" | xargs -r docker stop 2>/dev/null || true
-          docker ps -aq --filter "publish=50021" | xargs -r docker rm 2>/dev/null || true
-
-          # Start VOICEVOX with Docker Compose
-          docker compose up -d voicevox 2>/dev/null || docker-compose up -d voicevox
+          docker compose up -d voicevox
 
           # Wait for API to be ready (max 120 seconds)
           echo "Waiting for VOICEVOX API to be ready..."
@@ -211,6 +178,7 @@ jobs:
         run: python retry_pending_comments.py
 
       - name: Run data-driven generation
+        timeout-minutes: 90
         env:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
@@ -220,6 +188,7 @@ jobs:
           python generate_data_driven_video.py auto ${{ env.DURATION_MINUTES }}
 
       - name: Upload artifacts (video & assets)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: generated-video
@@ -232,4 +201,4 @@ jobs:
       - name: Stop VOICEVOX
         if: always()
         run: |
-          docker compose down 2>/dev/null || docker-compose down
+          docker compose down 2>/dev/null || true

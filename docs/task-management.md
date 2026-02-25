@@ -6,7 +6,7 @@
 
 このドキュメントをGoogle Driveで管理することを推奨します。以下のリンクから対応するスプレッドシートにアクセスできます。
 
-**スプレッドシートURL**: https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit?gid=0#gid=0
+**スプレッドシートURL**: GitHub Secretsの`GOOGLE_SHEETS_ID`で設定したスプレッドシートを使用
 
 ---
 
@@ -205,8 +205,8 @@
 
 プロジェクトに関する質問や提案は、以下で管理してください：
 
-- **Google Drive**: https://drive.google.com/drive/folders/YOUR_DRIVE_FOLDER_ID
-- **Discode**: https://discordapp.com/api/webhooks/REDACTED_WEBHOOK
+- **Google Drive**: GitHub Secretsで設定したフォルダを使用
+- **Discord**: GitHub Secretsの`DISCORD_WEBHOOK_URL`で設定
 - **Issue Tracker**: https://github.com/SakuLife/Greatma_Words.git
 
 ---

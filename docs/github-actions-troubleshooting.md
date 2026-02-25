@@ -148,7 +148,7 @@ The caller does not have permission
 **解決方法:**
 1. Google Sheets の URL を確認:
    ```
-   https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit
+   https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID_HERE/edit
                                           ↑ この部分がスプレッドシートID
    ```
 

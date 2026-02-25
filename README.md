@@ -134,16 +134,16 @@ python -m app.cli
 
 ### タスク管理
 Google Sheetsで全タスクを管理できます：
-- [タスク管理スプレッドシート](https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit?gid=0#gid=0)
+- タスク管理スプレッドシート（GitHub Secretsの`GOOGLE_SHEETS_ID`で設定）
 - [タスク管理ドキュメント](docs/task-management.md)
 
 ### Google Drive
 生成された動画はGoogle Driveに自動バックアップ：
-- [動画フォルダ](https://drive.google.com/drive/folders/YOUR_DRIVE_FOLDER_ID)
+- 動画フォルダ（Google Driveに自動バックアップ）
 
 ### Discord通知
 進捗状況はDiscordで受け取れます：
-- [Discord Webhook](https://discordapp.com/api/webhooks/REDACTED_WEBHOOK)
+- Discord Webhook（GitHub Secretsの`DISCORD_WEBHOOK_URL`で設定）
 
 ### GitHub
 - [リポジトリ](https://github.com/SakuLife/Greatma_Words.git)

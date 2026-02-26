@@ -2,10 +2,8 @@ name: Auto Generate Data-Driven Video
 
 on:
   schedule:
-    # 毎朝10時（JST）= UTC 1:00
+    # 毎朝10時（JST）= UTC 1:00 — 18時投稿に間に合うよう1日1回生成
     - cron: '0 1 * * *'
-    # 毎晩19時（JST）= UTC 10:00
-    - cron: '0 10 * * *'
   workflow_dispatch:
     inputs:
       duration_minutes:

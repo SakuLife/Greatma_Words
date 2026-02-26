@@ -254,7 +254,7 @@ class VideoWorkflow:
                     )
 
                 # Calculate scheduled publish time (next 21:00 JST)
-                publish_time = calculate_next_publish_time(target_hour=21)
+                publish_time = calculate_next_publish_time(target_hour=18)
 
                 metadata = VideoMetadata(
                     title=f"{person_name} - {theme}",
@@ -264,7 +264,7 @@ class VideoWorkflow:
                     tags=[person_name, theme, "教養", "ビジネス", "偉人"],
                     category_id=settings.youtube_default_category,
                     privacy_status=privacy_status,
-                    publish_at=publish_time,  # Schedule for next 21:00 JST
+                    publish_at=publish_time,  # Schedule for next 18:00 JST
                 )
 
                 video_id = await self.youtube_uploader.upload_video(

@@ -356,7 +356,7 @@ class VideoGenerationOrchestrator:
                 log_group("Step 6/6: YouTubeアップロード")
 
                 # Calculate scheduled publish time (next 21:00 JST)
-                publish_time = calculate_next_publish_time(target_hour=21)
+                publish_time = calculate_next_publish_time(target_hour=18)
 
                 # 関連動画リストを取得（説明文の内部リンク用）
                 related_videos: list[dict] = []
@@ -384,7 +384,7 @@ class VideoGenerationOrchestrator:
                         "AI時代",
                     ],
                     privacy_status=config.youtube_privacy,
-                    publish_at=publish_time,  # Schedule for next 21:00 JST
+                    publish_at=publish_time,  # Schedule for next 18:00 JST
                 )
 
                 video_id = await self.youtube_uploader.upload_video(
@@ -707,7 +707,7 @@ class VideoGenerationOrchestrator:
                 logger.info("Step 5/5: Uploading to YouTube...")
 
                 # Calculate scheduled publish time (next 21:00 JST)
-                publish_time = calculate_next_publish_time(target_hour=21)
+                publish_time = calculate_next_publish_time(target_hour=18)
 
                 # 関連動画リストを取得（説明文の内部リンク用）
                 related_videos: list[dict] = []
@@ -734,7 +734,7 @@ class VideoGenerationOrchestrator:
                         "AI生成",
                     ],
                     privacy_status=config.youtube_privacy,
-                    publish_at=publish_time,  # Schedule for next 21:00 JST
+                    publish_at=publish_time,  # Schedule for next 18:00 JST
                 )
 
                 video_id = await self.youtube_uploader.upload_video(

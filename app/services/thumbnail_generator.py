@@ -101,8 +101,8 @@ class ThumbnailGenerator:
         return thumbnail_path
 
     # リトライ設定
-    RETRY_WAIT_SECONDS = 180  # リトライ前の待機時間（3分）
-    MAX_RETRIES = 1  # リトライ回数（1回まで）
+    RETRY_WAIT_SECONDS = 30  # リトライ前の待機時間（30秒）
+    MAX_RETRIES = 2  # リトライ回数（2回まで、計3回試行）
 
     async def _generate_with_nanobanana(
         self, person_name: str, topic: str, output_path: Path, style: str,
@@ -118,29 +118,38 @@ class ThumbnailGenerator:
 
         last_error: Exception | None = None
         current_ref_urls = reference_image_urls
+        use_simplified_prompt = False
         for retry in range(self.MAX_RETRIES + 1):
             if retry > 0:
-                # 参照画像関連エラーの場合、参照画像なしでリトライ
                 error_str = str(last_error) if last_error else ""
+                # 参照画像関連エラーの場合、参照画像なしでリトライ
                 is_ref_image_error = any(kw in error_str for kw in [
                     "403", "Forbidden", "image_input", "file type not supported",
+                ])
+                # コンテンツポリシー違反や生成不可エラーの場合、簡略化プロンプトでリトライ
+                is_policy_error = any(kw in error_str for kw in [
+                    "Prohibited Use", "filtered out", "Could not generate",
+                    "policy", "safety",
                 ])
                 if is_ref_image_error:
                     logger.info(
                         f"参照画像関連エラー → 参照画像なしで再生成します: {error_str[:100]}"
                     )
                     current_ref_urls = None
-                else:
+                elif is_policy_error:
                     logger.info(
-                        f"サムネイル生成リトライ {retry}/{self.MAX_RETRIES}: "
-                        f"{self.RETRY_WAIT_SECONDS}秒待機後に再実行します..."
+                        f"コンテンツポリシーエラー → 簡略化プロンプトで再生成します: {error_str[:100]}"
                     )
-                    import time as _time
-                    _time.sleep(self.RETRY_WAIT_SECONDS)
+                    current_ref_urls = None
+                    use_simplified_prompt = True
+
+                import time as _time
+                _time.sleep(self.RETRY_WAIT_SECONDS)
 
             try:
                 return await self._generate_nanobanana_once(
-                    person_name, topic, output_path, style, quote, thumbnail_copy, current_ref_urls
+                    person_name, topic, output_path, style, quote, thumbnail_copy,
+                    current_ref_urls, use_simplified_prompt
                 )
             except Exception as e:
                 last_error = e
@@ -148,14 +157,19 @@ class ThumbnailGenerator:
                     f"サムネイル生成失敗（試行{retry + 1}/{self.MAX_RETRIES + 1}）: {e}"
                 )
 
-        raise RuntimeError(
-            f"Thumbnail generation failed with KIE AI after {self.MAX_RETRIES + 1} attempts: {last_error}"
-        ) from last_error
+        # 全リトライ失敗 → Pillowフォールバックサムネイルを生成
+        logger.warning(
+            f"KIE AI全試行失敗。Pillowフォールバックサムネイルを生成します: {last_error}"
+        )
+        return self._generate_fallback_thumbnail(
+            person_name, topic, output_path, thumbnail_copy
+        )
 
     async def _generate_nanobanana_once(
         self, person_name: str, topic: str, output_path: Path, style: str,
         quote: str | None = None, thumbnail_copy: dict | None = None,
-        reference_image_urls: list[str] | None = None
+        reference_image_urls: list[str] | None = None,
+        use_simplified_prompt: bool = False,
     ) -> Path:
         """KIE AI APIでサムネイルを1回生成する（リトライなし）。"""
         import time
@@ -164,9 +178,15 @@ class ThumbnailGenerator:
         person_title = get_person_title(person_name) or ""
 
         # プロンプト作成（文字入り画像生成用）
-        prompt = self._create_thumbnail_prompt_with_text(
-            person_name, person_title, topic, style, thumbnail_copy, reference_image_urls
-        )
+        if use_simplified_prompt:
+            prompt = self._create_simplified_thumbnail_prompt(
+                person_name, person_title, topic, thumbnail_copy
+            )
+            logger.info("簡略化プロンプトを使用")
+        else:
+            prompt = self._create_thumbnail_prompt_with_text(
+                person_name, person_title, topic, style, thumbnail_copy, reference_image_urls
+            )
         logger.info(f"KIE AI thumbnail prompt: {prompt}")
 
         # KIE AI API: タスク作成
@@ -399,23 +419,21 @@ class ThumbnailGenerator:
         if not sub_copy:
             sub_copy = topic[:15] if topic else ""
 
-        # 外見描写は常に使用（参照画像がある場合も顔特徴の参考指示を追加）
+        # 外見描写（ポリシー違反を避けるため簡潔にする）
         appearance = get_person_appearance(person_name)
+        # 年齢・民族的特徴を除去してポリシー違反リスクを低減
+        safe_appearance = self._sanitize_appearance(appearance)
         if reference_image_urls:
             person_description = (
-                f"PERSON: {appearance}, front-facing portrait, looking directly at camera, facing forward.\n"
-                f"REFERENCE IMAGES: Use ONLY for facial identity of {person_name}. "
-                f"Copy the face and facial features from reference. "
-                f"CRITICAL: Completely IGNORE the background, setting, environment, pose, "
-                f"and clothing from reference images. "
+                f"PERSON: {safe_appearance}, front-facing portrait, facing forward.\n"
+                f"REFERENCE IMAGES: Use for visual style reference only.\n"
                 f"ALWAYS generate with solid dark black studio background.\n"
-                f"NEGATIVE: No side view, no profile, no turned head, no looking away, "
-                f"no outdoor background, no natural scenery from references."
+                f"NEGATIVE: No side view, no profile, no turned head."
             )
         else:
             person_description = (
-                f"PERSON: {appearance}, front-facing portrait, looking directly at camera, facing forward.\n"
-                f"NEGATIVE: No side view, no profile, no turned head, no looking away."
+                f"PERSON: {safe_appearance}, front-facing portrait, facing forward.\n"
+                f"NEGATIVE: No side view, no profile, no turned head."
             )
 
         # プロンプト構築
@@ -444,6 +462,217 @@ STYLE:
 IMPORTANT: The Japanese text must be clearly readable and prominent."""
 
         return prompt
+
+    @staticmethod
+    def _sanitize_appearance(appearance: str) -> str:
+        """
+        外見描写からポリシー違反リスクのある表現を除去する。
+
+        具体的な年齢、民族・人種的特徴を一般化して安全なプロンプトにする。
+        """
+        import re
+
+        sanitized = appearance
+        # 民族・国籍・時代修飾を除去（先に実行して後続の置換を簡単にする）
+        sanitized = re.sub(
+            r"\b(Japanese|Italian|American|Chinese|German|French|Renaissance-era|"
+            r"18th century|Meiji-era|Sengoku period|late Edo period)\s*",
+            "",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        # 軍事・武器関連を先に除去
+        sanitized = re.sub(
+            r"\btraditional samurai armor( or formal attire)?\b",
+            "formal attire",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        sanitized = re.sub(
+            r"\b(samurai armor|armor|sword)\b",
+            "formal attire",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        sanitized = re.sub(
+            r"\b(samurai|warlord|daimyo|shogun)\b",
+            "leader",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        # "[年齢修飾] man/woman/gentleman" → "person"
+        sanitized = re.sub(
+            r"\b(very elderly|elderly|young|middle-aged|old)\s+"
+            r"(man|woman|person|gentleman)\b",
+            "person",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        # 残った単独の "man/woman/gentleman in his ..." → "person in ..."
+        sanitized = re.sub(
+            r"\b(man|woman|gentleman)\s+in\b",
+            "person in",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        # 残った単独の年齢修飾を除去
+        sanitized = re.sub(
+            r"\b(very elderly|elderly|young|middle-aged)\b",
+            "",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        # "in his 70s" 等の年齢表現を除去
+        sanitized = re.sub(
+            r"\bin (his|her|their) (early |mid |late )?\d+s\b",
+            "",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        # "leader , leader" / "leader, leader" のような重複語を除去
+        sanitized = re.sub(r"leader[\s,]+leader", "leader", sanitized)
+        sanitized = re.sub(r"formal attire[\s,]+formal attire", "formal attire", sanitized)
+        # クリーンアップ: 連続カンマ・スペース・不要な区切り
+        sanitized = re.sub(r"\s+,", ",", sanitized)  # "person ," → "person,"
+        sanitized = re.sub(r",\s*,", ",", sanitized)
+        sanitized = re.sub(r"\s{2,}", " ", sanitized).strip()
+        sanitized = re.sub(r"^,\s*|,\s*$", "", sanitized).strip()
+        return sanitized
+
+    def _create_simplified_thumbnail_prompt(
+        self,
+        person_name: str,
+        person_title: str,
+        topic: str,
+        thumbnail_copy: dict | None = None,
+    ) -> str:
+        """
+        コンテンツポリシー違反時の簡略化プロンプト。
+
+        人物描写を最小限にし、テキストとデザイン重視のサムネイルを生成する。
+        """
+        if thumbnail_copy:
+            main_copy = thumbnail_copy.get("main_copy", "")
+            sub_copy = thumbnail_copy.get("sub_copy", "")
+        else:
+            main_copy = ""
+            sub_copy = ""
+
+        if not main_copy:
+            main_copy = topic[:8] if topic else person_name
+        if not sub_copy:
+            sub_copy = topic[:15] if topic else ""
+
+        return f"""YouTube thumbnail design.
+
+TEXT ON IMAGE (MUST INCLUDE):
+- Large bold yellow Japanese text "{main_copy}" on the upper left
+- White Japanese text "{sub_copy}" below the main text
+- White bold text "{person_name}" at the bottom left
+- Small orange text "{person_title}" below the name
+
+LAYOUT:
+- A silhouette of a professional person on the RIGHT side
+- Text area on the LEFT side with dark gradient background
+- 16:9 aspect ratio
+
+STYLE:
+- Professional YouTube thumbnail
+- Dark moody background with dramatic lighting
+- Eye-catching, click-worthy design
+- High contrast between text and background
+- Abstract professional atmosphere
+
+IMPORTANT: The Japanese text must be clearly readable and prominent."""
+
+    def _generate_fallback_thumbnail(
+        self,
+        person_name: str,
+        topic: str,
+        output_path: Path,
+        thumbnail_copy: dict | None = None,
+    ) -> Path:
+        """
+        AI生成が全て失敗した場合のPillowフォールバックサムネイル。
+
+        テキスト重視のシンプルだが見栄えするサムネイルを生成する。
+        """
+        # 1280x720のサムネイル作成
+        width, height = 1280, 720
+
+        # グラデーション背景を作成
+        img = Image.new("RGB", (width, height), (10, 10, 30))
+        draw = ImageDraw.Draw(img)
+
+        # 簡易グラデーション（左：暗い、右：やや明るい）
+        for x in range(width):
+            r = int(10 + (x / width) * 30)
+            g = int(10 + (x / width) * 20)
+            b = int(30 + (x / width) * 40)
+            draw.line([(x, 0), (x, height)], fill=(r, g, b))
+
+        # 右側にアクセントの光（円形グラデーション風）
+        for i in range(200, 0, -1):
+            alpha = int(40 * (1 - i / 200))
+            color = (30 + alpha, 25 + alpha, 60 + alpha)
+            draw.ellipse(
+                [width - 400 - i, height // 2 - i, width - 400 + i, height // 2 + i],
+                fill=color,
+            )
+
+        # テキスト描画
+        fonts = self._load_fonts()
+
+        # キャッチコピー
+        if thumbnail_copy:
+            main_copy = thumbnail_copy.get("main_copy", "")
+            sub_copy = thumbnail_copy.get("sub_copy", "")
+        else:
+            main_copy = ""
+            sub_copy = ""
+
+        if not main_copy:
+            main_copy = topic[:8] if topic else person_name
+        if not sub_copy:
+            sub_copy = topic[:15] if topic else ""
+
+        person_title = get_person_title(person_name) or ""
+
+        # メインコピー（黄色、大きく）
+        self._draw_text_with_shadow(
+            draw, main_copy, 50, 80,
+            fonts["catchphrase_large"], self.COLORS["yellow"],
+            outline_width=6, shadow_offset=4,
+        )
+
+        # サブコピー（白）
+        self._draw_text_with_shadow(
+            draw, sub_copy, 50, 190,
+            fonts["catchphrase_medium"], self.COLORS["white"],
+            outline_width=4, shadow_offset=3,
+        )
+
+        # 人物名（白、太字）
+        self._draw_text_with_shadow(
+            draw, person_name, 50, height - 180,
+            fonts["name"], self.COLORS["white"],
+            outline_width=5, shadow_offset=3,
+        )
+
+        # 肩書（オレンジ）
+        if person_title:
+            name_font_height = self._get_font_height(fonts["name"])
+            self._draw_text_with_shadow(
+                draw, person_title, 50, height - 180 + name_font_height + 5,
+                fonts["title"], self.COLORS["orange"],
+                outline_width=3, shadow_offset=2,
+            )
+
+        # 保存
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        img.save(output_path, quality=95)
+        logger.info(f"✅ フォールバックサムネイル生成完了: {output_path}")
+        return output_path
 
     def _add_text_overlay(
         self, image_path: Path, person_name: str, topic: str, quote: str | None = None

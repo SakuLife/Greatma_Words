@@ -107,6 +107,31 @@ class ScriptGenerator:
         # Parse and validate response
         try:
             script_data = json.loads(script_json)
+
+            # AIがlistを返した場合の正規化
+            if isinstance(script_data, list):
+                logger.warning("AIがlistを返しました。dict形式に正規化します")
+                # listの中にdictが1つだけある場合はそれを使う
+                if len(script_data) == 1 and isinstance(script_data[0], dict):
+                    script_data = script_data[0]
+                # listがsectionsの配列の場合（トップレベルキーが欠落）
+                elif all(isinstance(item, dict) and "narration" in item for item in script_data):
+                    script_data = {
+                        "topic": topic,
+                        "person_name": person_name,
+                        "total_duration_minutes": duration_minutes,
+                        "sections": script_data,
+                    }
+                else:
+                    raise ValueError(
+                        f"AIのレスポンスが予期しないlist形式です: {str(script_data)[:200]}"
+                    )
+
+            if not isinstance(script_data, dict):
+                raise ValueError(
+                    f"AIのレスポンスがdict形式ではありません: type={type(script_data).__name__}"
+                )
+
             script = VideoScript(**script_data)
             logger.info(f"Successfully generated script with {len(script.sections)} sections")
 
